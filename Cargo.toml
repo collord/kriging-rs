@@ -81,3 +81,7 @@ codegen-units = 1
 [[bench]]
 name = "performance"
 harness = false
+
+[[bench]]
+name = "bench_3d_kdtree"
+harness = false
