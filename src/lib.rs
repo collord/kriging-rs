@@ -98,6 +98,7 @@ compile_error!(
 );
 
 pub mod aggregate;
+pub mod anisotropy_3d;
 pub mod coord_3d;
 pub mod cv;
 pub mod distance;
@@ -105,6 +106,7 @@ pub mod error;
 pub mod geo_dataset;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+pub mod interop;
 pub mod kriging;
 /// Dense linear-system helpers used internally by kriging models. Not part of the stable
 /// public API — use the higher-level `*KrigingModel` types to predict values; direct solver
@@ -123,6 +125,8 @@ pub mod variogram;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+pub use anisotropy_3d::Anisotropy3D;
+pub use interop::gslib_anisotropy::{GslibAnisotropy, from_gslib, to_gslib};
 pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;
 pub use error::KrigingError;
