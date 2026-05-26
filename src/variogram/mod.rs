@@ -5,6 +5,7 @@
 //! kriging. Supported model types include spherical, exponential, Gaussian, cubic, stable, and Matérn.
 
 pub mod empirical;
+pub mod experimental_3d;
 pub mod fitting;
 pub mod models;
 pub mod nested;
@@ -13,6 +14,7 @@ pub use empirical::{
     EmpiricalEstimator, EmpiricalVariogram, PositiveReal, VariogramConfig,
     compute_empirical_variogram, compute_empirical_variogram_binomial_calibrated,
 };
+pub use experimental_3d::compute_empirical_variogram_3d;
 pub use fitting::{FitResult, fit_variogram};
 pub use models::{VariogramModel, VariogramType};
 pub use nested::NestedVariogram;

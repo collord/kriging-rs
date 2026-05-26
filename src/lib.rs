@@ -153,5 +153,5 @@ pub use variogram::models::{VariogramModel, VariogramType};
 pub use variogram::nested::NestedVariogram;
 pub use variogram::{
     EmpiricalEstimator, PositiveReal, VariogramConfig, compute_empirical_variogram,
-    compute_empirical_variogram_binomial_calibrated,
+    compute_empirical_variogram_3d, compute_empirical_variogram_binomial_calibrated,
 };

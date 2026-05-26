@@ -4,7 +4,7 @@
 
 mod parity_3d {
     pub mod gslib_roundtrip;
-    pub mod geostatspy_reference;
+    pub mod skgstat_reference;
     pub mod gamv_reference;
     pub mod kt3d_reference;
     pub mod sgs_statistical_gates;
