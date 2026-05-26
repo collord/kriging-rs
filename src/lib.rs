@@ -98,6 +98,7 @@ compile_error!(
 );
 
 pub mod aggregate;
+pub mod coord_3d;
 pub mod cv;
 pub mod distance;
 pub mod error;
@@ -109,6 +110,8 @@ pub mod kriging;
 /// public API — use the higher-level `*KrigingModel` types to predict values; direct solver
 /// access is a crate-internal detail that may be removed in a future release.
 pub(crate) mod matrix;
+pub mod neighborhood;
+pub mod planar_dataset_3d;
 pub mod projected;
 pub mod simulation;
 pub mod spacetime;
@@ -120,9 +123,11 @@ pub mod variogram;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;
 pub use error::KrigingError;
 pub use geo_dataset::GeoDataset;
+pub use planar_dataset_3d::PlanarDataset3D;
 #[cfg(feature = "gpu")]
 pub use gpu::{GpuBackend, GpuSupport, build_rhs_covariances_gpu, detect_gpu_support, gpu_square};
 pub use kriging::binomial::{

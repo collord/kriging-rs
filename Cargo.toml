@@ -23,6 +23,7 @@ readme = "README.md"
 [dependencies]
 console_error_panic_hook = { version = "0.1.7", optional = true }
 nalgebra = { version = "0.34.1", default-features = false, features = ["std"] }
+kiddo = "5.3"
 js-sys = { version = "0.3.91", optional = true }
 rayon = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
