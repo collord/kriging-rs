@@ -65,6 +65,7 @@ pub struct Neighbour3D {
 type Tree = ImmutableKdTree<f64, u64, 3, 32>;
 
 /// Anisotropy-aware 3-D kd-tree.
+#[derive(Debug)]
 pub struct KdTree3D {
     tree: Tree,
     deformation: nalgebra::Matrix3<f64>,

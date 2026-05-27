@@ -10,6 +10,7 @@
 pub mod binomial;
 pub mod diagnostics;
 pub mod ordinary;
+pub mod ordinary_3d;
 pub mod simple;
 pub mod solver;
 pub mod universal;

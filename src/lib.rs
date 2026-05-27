@@ -146,6 +146,7 @@ pub use kriging::binomial::{
 };
 pub use kriging::diagnostics::{Prediction3D, SolverFailure};
 pub use kriging::ordinary::{Neighborhood, OrdinaryKrigingModel, Prediction};
+pub use kriging::ordinary_3d::{Neighborhood3D, OrdinaryKrigingModel3D};
 pub use kriging::simple::SimpleKrigingModel;
 pub use kriging::solver::{SolverConfig, solve_ordinary_kriging_3d};
 pub use kriging::universal::{UniversalKrigingModel, UniversalTrend};
