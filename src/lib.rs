@@ -101,6 +101,7 @@ pub mod aggregate;
 pub mod anisotropy_3d;
 pub mod coord_3d;
 pub mod cv;
+pub mod cv_3d;
 pub mod distance;
 pub mod error;
 pub mod geo_dataset;
