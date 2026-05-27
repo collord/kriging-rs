@@ -376,6 +376,9 @@ where
 /// and a realization index. Different from the xoshiro RNG itself —
 /// this is just the diffusion function used for seed derivation, so
 /// `(seed, 0)` and `(seed, 1)` produce uncorrelated streams.
+///
+/// Only used by the parallel SGS path, which is `cfg(not(wasm32))`.
+#[cfg(not(target_arch = "wasm32"))]
 #[inline]
 fn splitmix64_mix(base: u64, idx: u64) -> u64 {
     let mut z = base.wrapping_add(idx).wrapping_add(0x9E3779B97F4A7C15);

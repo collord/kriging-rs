@@ -51,6 +51,7 @@ use crate::{Real, compute_empirical_variogram};
 use std::num::NonZeroUsize;
 
 pub mod spacetime;
+pub mod three_d;
 
 /// WASM-exposed variogram type enum; maps to crate's VariogramType.
 #[wasm_bindgen]
