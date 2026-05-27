@@ -1,10 +1,9 @@
-# scikit-gstat reference fixture for 3-D ordinary kriging (M9)
+# Textbook ordinary kriging reference fixture (M9)
 
-1000 deterministic predict-location/expected-prediction pairs from
-[scikit-gstat](https://scikit-gstat.readthedocs.io/) 1.0.23's
-`OrdinaryKriging` on the same 150-point M5 dataset, with a hand-set
-exponential variogram. Consumed by
-[`tests/parity_3d/skgstat_kriging_reference.rs`](../../skgstat_kriging_reference.rs).
+1000 deterministic predict-location/expected-prediction pairs from a
+**textbook semivariance-form OK** implementation in numpy on the same
+150-point M5 dataset, with a hand-set exponential variogram. Consumed
+by [`tests/parity_3d/textbook_kriging_reference.rs`](../../textbook_kriging_reference.rs).
 
 ## Why a textbook reference instead of scikit-gstat or GSLib `kt3d`
 

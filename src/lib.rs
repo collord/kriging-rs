@@ -147,8 +147,13 @@ pub use kriging::binomial::{
 pub use kriging::diagnostics::{Prediction3D, SolverFailure};
 pub use kriging::ordinary::{Neighborhood, OrdinaryKrigingModel, Prediction};
 pub use kriging::ordinary_3d::{Neighborhood3D, OrdinaryKrigingModel3D};
+pub use kriging::simple_3d::SimpleKrigingModel3D;
+pub use kriging::universal_3d::{Trend3D, UniversalKrigingModel3D};
 pub use kriging::simple::SimpleKrigingModel;
-pub use kriging::solver::{SolverConfig, solve_ordinary_kriging_3d};
+pub use kriging::solver::{
+    SolverConfig, solve_ordinary_kriging_3d, solve_simple_kriging_3d,
+    solve_universal_kriging_3d_linear,
+};
 pub use kriging::universal::{UniversalKrigingModel, UniversalTrend};
 pub use projected::{
     Anisotropy2D, BinomialProjectedKrigingModel, DirectionalConfig, ProjectedBinomialFit,

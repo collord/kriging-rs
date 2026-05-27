@@ -6,6 +6,6 @@ mod parity_3d {
     pub mod gslib_roundtrip;
     pub mod skgstat_reference;
     pub mod gamv_reference;
-    pub mod skgstat_kriging_reference;
+    pub mod textbook_kriging_reference;
     pub mod sgs_statistical_gates;
 }

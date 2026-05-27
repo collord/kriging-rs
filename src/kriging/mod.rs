@@ -12,5 +12,7 @@ pub mod diagnostics;
 pub mod ordinary;
 pub mod ordinary_3d;
 pub mod simple;
+pub mod simple_3d;
 pub mod solver;
 pub mod universal;
+pub mod universal_3d;
