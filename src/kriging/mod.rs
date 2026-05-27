@@ -8,6 +8,8 @@
 //!   heteroskedastic variant.
 
 pub mod binomial;
+pub mod diagnostics;
 pub mod ordinary;
 pub mod simple;
+pub mod solver;
 pub mod universal;

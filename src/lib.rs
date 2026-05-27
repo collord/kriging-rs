@@ -144,8 +144,10 @@ pub use kriging::binomial::{
     HeteroskedasticBinomialConfig, build_binomial_observations_dropping_zero_trials,
     indices_of_zero_trials, logit_observation_variance_empirical_bayes,
 };
+pub use kriging::diagnostics::{Prediction3D, SolverFailure};
 pub use kriging::ordinary::{Neighborhood, OrdinaryKrigingModel, Prediction};
 pub use kriging::simple::SimpleKrigingModel;
+pub use kriging::solver::{SolverConfig, solve_ordinary_kriging_3d};
 pub use kriging::universal::{UniversalKrigingModel, UniversalTrend};
 pub use projected::{
     Anisotropy2D, BinomialProjectedKrigingModel, DirectionalConfig, ProjectedBinomialFit,
