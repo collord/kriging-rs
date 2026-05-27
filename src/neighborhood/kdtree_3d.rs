@@ -41,6 +41,7 @@
 use std::num::NonZeroUsize;
 
 use kiddo::SquaredEuclidean;
+use kiddo::float::kdtree::KdTree;
 use kiddo::immutable::float::kdtree::ImmutableKdTree;
 use nalgebra::Vector3;
 
@@ -143,6 +144,160 @@ impl KdTree3D {
                 distance: nn.distance.sqrt(),
             })
             .collect()
+    }
+}
+
+// kiddo mutable kd-tree type alias.
+type MutableTree = KdTree<f64, u64, 3, 32, u32>;
+
+/// Anisotropy-aware **mutable** 3-D kd-tree.
+///
+/// Used by SGS to maintain a growing conditioning set during a single
+/// realization. The pre-transformation logic is identical to the
+/// immutable [`KdTree3D`]; the difference is `add` is supported and
+/// `build_with_capacity` allows pre-allocating enough space for the
+/// final size to avoid rehashing.
+///
+/// API mirrors [`KdTree3D`] but each query operates on the current
+/// (live) point set rather than a snapshot.
+#[derive(Debug)]
+pub struct MutableKdTree3D {
+    tree: MutableTree,
+    deformation: nalgebra::Matrix3<f64>,
+    /// Monotonically increasing as `add` is called. kiddo's mutable
+    /// tree internally tracks `size()`; this is just a local cache for
+    /// callers who want it without a method call.
+    next_id: u64,
+}
+
+impl MutableKdTree3D {
+    /// Construct an empty mutable kd-tree with the given anisotropy.
+    pub fn new(anisotropy: Anisotropy3D) -> Self {
+        Self {
+            tree: MutableTree::with_capacity(0),
+            deformation: anisotropy.deformation_matrix(),
+            next_id: 0,
+        }
+    }
+
+    /// Construct an empty tree pre-sized for `capacity` points. Avoids
+    /// reallocation as a known number of points is added; useful for
+    /// SGS where we know `n_samples + n_grid_cells` upfront.
+    pub fn with_capacity(anisotropy: Anisotropy3D, capacity: usize) -> Self {
+        Self {
+            tree: MutableTree::with_capacity(capacity),
+            deformation: anisotropy.deformation_matrix(),
+            next_id: 0,
+        }
+    }
+
+    /// Add an initial batch of points. The returned indices identify
+    /// each point for subsequent queries; the first point gets index 0,
+    /// the second gets 1, etc.
+    pub fn add_batch(&mut self, points: &[Coord3D]) {
+        for p in points {
+            self.add(*p);
+        }
+    }
+
+    /// Add a single point and return its assigned index (0-based, in
+    /// insertion order).
+    pub fn add(&mut self, point: Coord3D) -> usize {
+        let v = Vector3::new(point.x as f64, point.y as f64, point.z as f64);
+        let tp = self.deformation * v;
+        let id = self.next_id;
+        self.tree.add(&[tp[0], tp[1], tp[2]], id);
+        self.next_id += 1;
+        id as usize
+    }
+
+    /// Number of points currently in the tree.
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.tree.size() as usize
+    }
+
+    fn transform_query(&self, query: Coord3D) -> [f64; 3] {
+        let v = Vector3::new(query.x as f64, query.y as f64, query.z as f64);
+        let tq = self.deformation * v;
+        [tq[0], tq[1], tq[2]]
+    }
+
+    /// Find up to `max_count` nearest neighbours under anisotropic
+    /// distance. Returns an empty Vec if the tree is empty.
+    pub fn nearest_n(&self, query: Coord3D, max_count: usize) -> Vec<Neighbour3D> {
+        if self.tree.size() == 0 || max_count == 0 {
+            return Vec::new();
+        }
+        let q = self.transform_query(query);
+        self.tree
+            .nearest_n::<SquaredEuclidean>(&q, max_count)
+            .into_iter()
+            .map(|nn| Neighbour3D {
+                index: nn.item as usize,
+                distance: nn.distance.sqrt(),
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod mutable_tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    #[test]
+    fn empty_tree_returns_empty_nearest_n() {
+        let tree = MutableKdTree3D::new(Anisotropy3D::identity());
+        assert_eq!(tree.size(), 0);
+        let q = tree.nearest_n(Coord3D::new(0.0, 0.0, 0.0), 5);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn add_then_query_returns_added_point() {
+        let mut tree = MutableKdTree3D::new(Anisotropy3D::identity());
+        let id = tree.add(Coord3D::new(3.0, 4.0, 12.0));
+        assert_eq!(id, 0);
+        assert_eq!(tree.size(), 1);
+        let q = tree.nearest_n(Coord3D::new(0.0, 0.0, 0.0), 1);
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].index, 0);
+        assert_relative_eq!(q[0].distance, 13.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn incremental_add_reflects_in_subsequent_queries() {
+        let mut tree = MutableKdTree3D::new(Anisotropy3D::identity());
+        tree.add(Coord3D::new(0.0, 0.0, 0.0));
+        // Before adding the closer point, nearest to (5,0,0) is (0,0,0).
+        let q1 = tree.nearest_n(Coord3D::new(5.0, 0.0, 0.0), 1);
+        assert_eq!(q1[0].index, 0);
+        // After adding (6,0,0), it should be closer.
+        tree.add(Coord3D::new(6.0, 0.0, 0.0));
+        let q2 = tree.nearest_n(Coord3D::new(5.0, 0.0, 0.0), 1);
+        assert_eq!(q2[0].index, 1);
+    }
+
+    #[test]
+    fn anisotropy_propagates_into_mutable_tree() {
+        let aniso = Anisotropy3D::from_rotation_matrix(
+            nalgebra::Matrix3::identity(),
+            nalgebra::Vector3::new(1.0, 1.0, 10.0),
+        )
+        .unwrap();
+        let mut tree = MutableKdTree3D::new(aniso);
+        tree.add(Coord3D::new(0.0, 0.0, 0.0));
+        tree.add(Coord3D::new(1.0, 0.0, 0.0));
+        tree.add(Coord3D::new(0.0, 0.0, 1.0)); // 10x stretched in z
+        // Query at origin: index 0 is closest at d=0. Among the other two,
+        // (1,0,0) at d=1 is closer than (0,0,1) at anisotropic d=10.
+        let q = tree.nearest_n(Coord3D::new(0.0, 0.0, 0.0), 3);
+        assert_eq!(q[0].index, 0);
+        assert_eq!(q[1].index, 1);
+        assert_eq!(q[2].index, 2);
+        assert_relative_eq!(q[1].distance, 1.0, epsilon = 1e-6);
+        assert_relative_eq!(q[2].distance, 10.0, epsilon = 1e-6);
     }
 }
 

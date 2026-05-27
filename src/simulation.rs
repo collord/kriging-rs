@@ -73,12 +73,12 @@ use crate::variogram::models::VariogramModel;
 /// without pulling `rand` into the runtime dependency graph. It has well-known good
 /// statistical properties for Monte-Carlo-style use.
 #[derive(Debug, Clone)]
-struct Rng {
+pub(crate) struct Rng {
     state: [u64; 4],
 }
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         let mut sm = seed;
         let mut next = || {
             sm = sm.wrapping_add(0x9E3779B97F4A7C15);
@@ -92,7 +92,7 @@ impl Rng {
         }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         let result = self.state[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = self.state[1] << 17;
         self.state[2] ^= self.state[0];
@@ -105,14 +105,14 @@ impl Rng {
     }
 
     /// Uniform `(0, 1)` — strictly positive so `ln` is safe.
-    fn next_unit(&mut self) -> Real {
+    pub(crate) fn next_unit(&mut self) -> Real {
         let u = (self.next_u64() >> 11) as Real;
         let scale = (1u64 << 53) as Real;
         (u + 0.5) / scale
     }
 
     /// Standard normal sample via Box-Muller.
-    fn next_standard_normal(&mut self) -> Real {
+    pub(crate) fn next_standard_normal(&mut self) -> Real {
         let u1 = self.next_unit();
         let u2 = self.next_unit();
         let r = (-2.0 * u1.ln()).sqrt();

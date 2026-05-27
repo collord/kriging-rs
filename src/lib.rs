@@ -116,6 +116,7 @@ pub mod neighborhood;
 pub mod planar_dataset_3d;
 pub mod projected;
 pub mod simulation;
+pub mod simulation_3d;
 pub mod spacetime;
 pub mod utils;
 
@@ -149,6 +150,10 @@ pub use kriging::ordinary::{Neighborhood, OrdinaryKrigingModel, Prediction};
 pub use kriging::ordinary_3d::{Neighborhood3D, OrdinaryKrigingModel3D};
 pub use kriging::simple_3d::SimpleKrigingModel3D;
 pub use kriging::universal_3d::{Trend3D, UniversalKrigingModel3D};
+pub use simulation_3d::{
+    Grid3D, NormalScoreTransform, SgsConfig, SgsError, SgsModel3D, SgsOutputSpace,
+    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_with,
+};
 pub use kriging::simple::SimpleKrigingModel;
 pub use kriging::solver::{
     SolverConfig, solve_ordinary_kriging_3d, solve_simple_kriging_3d,

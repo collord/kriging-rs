@@ -85,3 +85,7 @@ harness = false
 [[bench]]
 name = "bench_3d_kdtree"
 harness = false
+
+[[bench]]
+name = "bench_3d_sgs_streaming"
+harness = false
