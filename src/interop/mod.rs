@@ -5,3 +5,4 @@
 //! ang1→ang2→ang3 composition order.
 
 pub mod gslib_anisotropy;
+pub mod gslib_directional;

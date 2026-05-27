@@ -127,6 +127,10 @@ pub mod wasm;
 
 pub use anisotropy_3d::Anisotropy3D;
 pub use interop::gslib_anisotropy::{GslibAnisotropy, from_gslib, to_gslib};
+pub use interop::gslib_directional::GslibDirection;
+pub use variogram::{
+    DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d,
+};
 pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;
 pub use error::KrigingError;

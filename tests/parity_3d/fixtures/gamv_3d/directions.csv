@@ -1,0 +1,5 @@
+idx,name,azm,atol,bandh,dip,dtol,bandv,xlag,xltol,nlag
+0,omni,0,90,10000000000,0,90,10000000000,12,6,10
+1,azim_north,0,22.5,25,0,22.5,25,12,6,10
+2,azim_east,90,22.5,25,0,22.5,25,12,6,10
+3,vertical,0,22.5,25,90,22.5,25,12,6,10
