@@ -10,6 +10,9 @@
 
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
 use crate::coord_3d::Coord3D;
@@ -113,7 +116,18 @@ impl SimpleKrigingModel3D {
         .map_err(|e| KrigingError::MatrixError(format!("{e}")))
     }
 
-    /// Predict a batch of targets.
+    /// Predict a batch of targets. Native: parallel via rayon. WASM:
+    /// sequential. See [`super::ordinary_3d::OrdinaryKrigingModel3D::predict_batch`]
+    /// for the parallelism rationale.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn predict_batch(
+        &self,
+        targets: &[Coord3D],
+    ) -> Result<Vec<Prediction3D>, KrigingError> {
+        targets.par_iter().map(|t| self.predict(*t)).collect()
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn predict_batch(
         &self,
         targets: &[Coord3D],

@@ -15,6 +15,9 @@
 
 use std::num::NonZeroUsize;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
 use crate::coord_3d::Coord3D;
@@ -196,6 +199,21 @@ impl OrdinaryKrigingModel3D {
 
     /// Predict a batch of targets. Each prediction is independent; the
     /// solver state isn't cached across targets in v1.
+    ///
+    /// Native builds use rayon to parallelize across targets (each
+    /// `predict` call takes `&self` so the model is naturally
+    /// thread-safe). WASM builds run sequentially (rayon's thread-pool
+    /// model doesn't apply to single-threaded wasm32-unknown-unknown).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn predict_batch(
+        &self,
+        targets: &[Coord3D],
+    ) -> Result<Vec<Prediction3D>, KrigingError> {
+        targets.par_iter().map(|t| self.predict(*t)).collect()
+    }
+
+    /// WASM (single-threaded) fallback for [`Self::predict_batch`].
+    #[cfg(target_arch = "wasm32")]
     pub fn predict_batch(
         &self,
         targets: &[Coord3D],

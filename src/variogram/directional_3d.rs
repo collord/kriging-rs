@@ -15,7 +15,11 @@
 //! variant. The Matheron estimator is implemented; Cressie-Hawkins follows
 //! upstream's formula on the same per-bin accumulators.
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::Real;
+use crate::coord_3d::Coord3D;
 use crate::error::KrigingError;
 use crate::planar_dataset_3d::PlanarDataset3D;
 use crate::variogram::empirical::{
@@ -145,82 +149,27 @@ pub fn compute_directional_variogram_3d(
     let max_centre = (config.n_lags.saturating_sub(1)) as f64 * xlag;
     let dismxs = ((max_centre + xltol + f64::EPSILON) * 1.0_f64).powi(2);
 
-    // Per-lag accumulators (1-indexed in this code; lag 0 unused).
-    let mut dist_sums = vec![0.0_f64; config.n_lags];
-    let mut value_sums = vec![0.0_f64; config.n_lags];
-    let mut counts = vec![0usize; config.n_lags];
+    let n_lags = config.n_lags;
 
-    let accumulate = |bin: usize,
-                      d: f64,
-                      zi: Real,
-                      zj: Real,
-                      dist_sums: &mut [f64],
-                      value_sums: &mut [f64],
-                      counts: &mut [usize]| {
-        let dz = (zi - zj).abs() as f64;
-        let g = if robust { dz.sqrt() } else { 0.5 * dz * dz };
-        dist_sums[bin] += d;
-        value_sums[bin] += g;
-        counts[bin] += 1;
-    };
-
-    for i in 0..n {
-        // gamv loops j from i (inclusive of self-pairs); we loop from i+1
-        // because self-pairs always have h=0 and only land in the lag-1
-        // bin if xltol >= xlag/2. Excluding them keeps the count comparable
-        // to mainstream geostatistics practice. The parity test strips
-        // gamv's lag-1 self bin before comparing.
-        for j in (i + 1)..n {
-            let pi = coords[i];
-            let pj = coords[j];
-            let dx = (pj.x - pi.x) as f64;
-            let dy = (pj.y - pi.y) as f64;
-            let dz = (pj.z - pi.z) as f64;
-            let hs = dx * dx + dy * dy + dz * dz;
-            if hs > dismxs {
-                continue;
-            }
-            let h = hs.max(0.0).sqrt();
-
-            // Find which lag(s) accept this distance. gamv allows multiple
-            // bins per pair if xltol > xlag/2; with xltol = xlag/2 each
-            // pair lands in at most one bin.
-            //
-            // Lag k (1-indexed externally, k-1 0-indexed here) is centred
-            // at (k-1)*xlag. Lag 1 catches the near-zero non-self pairs
-            // (h in (0, xltol]), matching gamv's "lag 2" (gamv's lag 1
-            // is reserved for self-pairs which we don't generate).
-            for k in 1..=config.n_lags {
-                let centre = (k as f64 - 1.0) * xlag;
-                if h >= centre - xltol && h <= centre + xltol {
-                    if filter.accepts(dx, dy, dz, h).is_some() {
-                        accumulate(
-                            k - 1,
-                            h,
-                            values[i],
-                            values[j],
-                            &mut dist_sums,
-                            &mut value_sums,
-                            &mut counts,
-                        );
-                        if filter.omni {
-                            // Double-count for omni mode, matching
-                            // gamv.f90:473-484.
-                            accumulate(
-                                k - 1,
-                                h,
-                                values[j],
-                                values[i],
-                                &mut dist_sums,
-                                &mut value_sums,
-                                &mut counts,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Native: parallelize the i loop with rayon, per-row accumulators
+    // reduced into a single result. WASM: serial.
+    //
+    // gamv loops j from i (inclusive of self-pairs); we loop from i+1
+    // because self-pairs always have h=0 and only land in the lag-1
+    // bin if xltol >= xlag/2. Excluding them keeps the count comparable
+    // to mainstream geostatistics practice. The parity test strips
+    // gamv's lag-1 self bin before comparing.
+    let (dist_sums, value_sums, counts) = accumulate_directional_pairs(
+        n,
+        coords,
+        values,
+        filter,
+        n_lags,
+        xlag,
+        xltol,
+        dismxs,
+        robust,
+    );
 
     let mut distances = Vec::new();
     let mut semivariances = Vec::new();
@@ -254,6 +203,141 @@ pub fn compute_directional_variogram_3d(
         semivariances,
         n_pairs,
     })
+}
+
+/// Per-row body of the directional accumulation loop. Encapsulated so
+/// the rayon and serial drivers share the inner logic verbatim.
+#[inline]
+fn directional_row_into(
+    i: usize,
+    n: usize,
+    coords: &[Coord3D],
+    values: &[Real],
+    filter: &DirectionFilter3D,
+    n_lags: usize,
+    xlag: f64,
+    xltol: f64,
+    dismxs: f64,
+    robust: bool,
+    dist_sums: &mut [f64],
+    value_sums: &mut [f64],
+    counts: &mut [usize],
+) {
+    let pi = coords[i];
+    for j in (i + 1)..n {
+        let pj = coords[j];
+        let dx = (pj.x - pi.x) as f64;
+        let dy = (pj.y - pi.y) as f64;
+        let dz = (pj.z - pi.z) as f64;
+        let hs = dx * dx + dy * dy + dz * dz;
+        if hs > dismxs {
+            continue;
+        }
+        let h = hs.max(0.0).sqrt();
+
+        for k in 1..=n_lags {
+            let centre = (k as f64 - 1.0) * xlag;
+            if h >= centre - xltol
+                && h <= centre + xltol
+                && filter.accepts(dx, dy, dz, h).is_some()
+            {
+                let dz_val = (values[i] - values[j]).abs() as f64;
+                let g = if robust {
+                    dz_val.sqrt()
+                } else {
+                    0.5 * dz_val * dz_val
+                };
+                dist_sums[k - 1] += h;
+                value_sums[k - 1] += g;
+                counts[k - 1] += 1;
+                if filter.omni {
+                    // gamv.f90:473-484 double-count for omni mode.
+                    dist_sums[k - 1] += h;
+                    value_sums[k - 1] += g; // symmetric in (vi, vj) -> same g
+                    counts[k - 1] += 1;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn accumulate_directional_pairs(
+    n: usize,
+    coords: &[Coord3D],
+    values: &[Real],
+    filter: &DirectionFilter3D,
+    n_lags: usize,
+    xlag: f64,
+    xltol: f64,
+    dismxs: f64,
+    robust: bool,
+) -> (Vec<f64>, Vec<f64>, Vec<usize>) {
+    let identity =
+        || (vec![0.0_f64; n_lags], vec![0.0_f64; n_lags], vec![0usize; n_lags]);
+    (0..n)
+        .into_par_iter()
+        .fold(identity, |mut acc, i| {
+            directional_row_into(
+                i,
+                n,
+                coords,
+                values,
+                filter,
+                n_lags,
+                xlag,
+                xltol,
+                dismxs,
+                robust,
+                &mut acc.0,
+                &mut acc.1,
+                &mut acc.2,
+            );
+            acc
+        })
+        .reduce(identity, |mut a, b| {
+            for k in 0..n_lags {
+                a.0[k] += b.0[k];
+                a.1[k] += b.1[k];
+                a.2[k] += b.2[k];
+            }
+            a
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn accumulate_directional_pairs(
+    n: usize,
+    coords: &[Coord3D],
+    values: &[Real],
+    filter: &DirectionFilter3D,
+    n_lags: usize,
+    xlag: f64,
+    xltol: f64,
+    dismxs: f64,
+    robust: bool,
+) -> (Vec<f64>, Vec<f64>, Vec<usize>) {
+    let mut dist_sums = vec![0.0_f64; n_lags];
+    let mut value_sums = vec![0.0_f64; n_lags];
+    let mut counts = vec![0usize; n_lags];
+    for i in 0..n {
+        directional_row_into(
+            i,
+            n,
+            coords,
+            values,
+            filter,
+            n_lags,
+            xlag,
+            xltol,
+            dismxs,
+            robust,
+            &mut dist_sums,
+            &mut value_sums,
+            &mut counts,
+        );
+    }
+    (dist_sums, value_sums, counts)
 }
 
 #[cfg(test)]

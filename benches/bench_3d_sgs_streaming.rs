@@ -18,8 +18,9 @@ use std::path::PathBuf;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use kriging_rs::{
-    Anisotropy3D, Coord3D, Grid3D, PlanarDataset3D, Real, SgsModel3D, VariogramModel,
-    VariogramType, gaussian_simulation_3d_stream,
+    Anisotropy3D, Coord3D, Grid3D, PlanarDataset3D, Real, SgsModel3D, SgsOutputSpace,
+    VariogramModel, VariogramType, gaussian_simulation_3d_stream,
+    gaussian_simulation_3d_stream_parallel,
 };
 
 fn samples_path() -> PathBuf {
@@ -98,7 +99,59 @@ fn bench_sgs_one_realization(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_sgs_one_realization);
+/// Compare serial vs parallel SGS at a fixed grid size (the most
+/// interesting realistic workload) across varying realization counts.
+/// Answers "how much speedup does rayon give us across realizations?"
+fn bench_sgs_serial_vs_parallel(c: &mut Criterion) {
+    let dataset = load_dataset();
+    let model =
+        SgsModel3D::new(dataset, Anisotropy3D::identity(), variogram()).unwrap();
+    // 30^3 grid is the rough "interactive ceiling" we found in M11.
+    let grid = build_grid(30);
+
+    let realization_counts = [4, 16];
+    let mut group = c.benchmark_group("sgs_3d_serial_vs_parallel_30cubed");
+    group.sample_size(10);
+
+    for n_real in realization_counts {
+        group.bench_with_input(
+            BenchmarkId::new("serial", n_real),
+            &n_real,
+            |b, &n_real| {
+                b.iter(|| {
+                    gaussian_simulation_3d_stream(&model, &grid, 1234, n_real, |_, gv| {
+                        std::hint::black_box(gv);
+                        Ok(())
+                    })
+                    .unwrap();
+                });
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("parallel", n_real),
+            &n_real,
+            |b, &n_real| {
+                b.iter(|| {
+                    gaussian_simulation_3d_stream_parallel(
+                        &model,
+                        &grid,
+                        1234,
+                        n_real,
+                        SgsOutputSpace::DataSpace,
+                        |_, gv| {
+                            std::hint::black_box(gv);
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_sgs_one_realization, bench_sgs_serial_vs_parallel);
 criterion_main!(benches);
 
 // Baseline numbers (M11, macOS x86_64 release, 150-sample dataset,

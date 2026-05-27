@@ -14,5 +14,5 @@ pub use grid::Grid3D;
 pub use nst::NormalScoreTransform;
 pub use sgs_3d::{
     SgsConfig, SgsError, SgsModel3D, SgsOutputSpace, gaussian_simulation_3d_stream,
-    gaussian_simulation_3d_stream_with,
+    gaussian_simulation_3d_stream_parallel, gaussian_simulation_3d_stream_with,
 };

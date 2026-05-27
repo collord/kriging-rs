@@ -12,8 +12,12 @@
 //! variant — `distances`, `semivariances`, `n_pairs` are metric-agnostic
 //! and reused unchanged.
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
+use crate::coord_3d::Coord3D;
 use crate::error::KrigingError;
 use crate::planar_dataset_3d::PlanarDataset3D;
 use crate::variogram::empirical::{EmpiricalEstimator, EmpiricalVariogram, VariogramConfig};
@@ -35,45 +39,12 @@ pub fn compute_empirical_variogram_3d(
 
     let robust = matches!(config.estimator, EmpiricalEstimator::CressieHawkins);
 
-    // Pair-distance evaluator: anisotropic distance between two world-frame
-    // points, returned as Real (the storage precision). Cast through f64 for
-    // the matrix multiply so the result honours the f64 anisotropy.
-    let pair_distance = |i: usize, j: usize| -> Real {
-        anisotropy.anisotropic_distance(coords[i], coords[j]) as Real
-    };
-
-    // Per-bin accumulators.
-    let mut dist_sums = vec![0.0 as Real; n_bins];
-    let mut value_sums = vec![0.0 as Real; n_bins];
-    let mut counts = vec![0usize; n_bins];
-
-    let accumulate = |i: usize,
-                      j: usize,
-                      bin: usize,
-                      d: Real,
-                      dist_sums: &mut [Real],
-                      value_sums: &mut [Real],
-                      counts: &mut [usize]| {
-        let dz = (values[i] - values[j]).abs();
-        let g = if robust { dz.sqrt() } else { 0.5 * dz * dz };
-        dist_sums[bin] += d;
-        value_sums[bin] += g;
-        counts[bin] += 1;
-    };
-
     let bin_width = match config.max_distance {
         Some(max_dist) => max_dist.get() / n_bins as Real,
         None => {
-            // Two-pass: find max distance, then bin.
-            let mut max_observed: Real = 0.0;
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    let d = pair_distance(i, j);
-                    if d > max_observed {
-                        max_observed = d;
-                    }
-                }
-            }
+            // Two-pass: find max distance, then bin. Each row i's max is
+            // an independent reduction so this parallelizes cleanly.
+            let max_observed = row_max_distance(n, coords, anisotropy);
             if max_observed <= 0.0 {
                 return Err(KrigingError::FittingError(
                     "max distance must be positive".to_string(),
@@ -95,29 +66,13 @@ pub fn compute_empirical_variogram_3d(
     // than clamped into the last bin; for any non-degenerate dataset this
     // affects at most a handful of pairs.
     let max_d = config.max_distance.map(|m| m.get()).unwrap_or(bin_width * n_bins as Real);
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = pair_distance(i, j);
-            if d >= max_d {
-                continue;
-            }
-            let bin = (d / bin_width).floor() as usize;
-            // Defensive: floor on an f32 division can land at n_bins for
-            // exactly-on-boundary values. Skip those rather than clamp.
-            if bin >= n_bins {
-                continue;
-            }
-            accumulate(
-                i,
-                j,
-                bin,
-                d,
-                &mut dist_sums,
-                &mut value_sums,
-                &mut counts,
-            );
-        }
-    }
+
+    // Parallelize over rows i. Each row produces its own per-bin
+    // accumulator tuples, then a tree-reduction sums them. Sequential
+    // builds (wasm32) use the same accumulator shape via a serial fold.
+    let (dist_sums, value_sums, counts) = accumulate_pairs(
+        n, coords, values, anisotropy, n_bins, bin_width, max_d, robust,
+    );
 
     let mut distances = Vec::new();
     let mut semivariances = Vec::new();
@@ -151,6 +106,133 @@ pub fn compute_empirical_variogram_3d(
         semivariances,
         n_pairs,
     })
+}
+
+/// Maximum anisotropic pair distance across all i<j. Native: rayon
+/// reduction. WASM: serial.
+#[cfg(not(target_arch = "wasm32"))]
+fn row_max_distance(
+    n: usize,
+    coords: &[Coord3D],
+    anisotropy: &Anisotropy3D,
+) -> Real {
+    (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut m: Real = 0.0;
+            for j in (i + 1)..n {
+                let d = anisotropy.anisotropic_distance(coords[i], coords[j]) as Real;
+                if d > m {
+                    m = d;
+                }
+            }
+            m
+        })
+        .reduce(|| 0.0, |a, b| if a > b { a } else { b })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn row_max_distance(
+    n: usize,
+    coords: &[Coord3D],
+    anisotropy: &Anisotropy3D,
+) -> Real {
+    let mut max_observed: Real = 0.0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = anisotropy.anisotropic_distance(coords[i], coords[j]) as Real;
+            if d > max_observed {
+                max_observed = d;
+            }
+        }
+    }
+    max_observed
+}
+
+/// Compute per-bin (dist_sum, value_sum, count) accumulators across all
+/// pairs `(i, j)` with `i < j`. Each row `i` is independent; per-row
+/// partial accumulators are tree-reduced. Native: rayon. WASM: serial.
+#[cfg(not(target_arch = "wasm32"))]
+fn accumulate_pairs(
+    n: usize,
+    coords: &[Coord3D],
+    values: &[Real],
+    anisotropy: &Anisotropy3D,
+    n_bins: usize,
+    bin_width: Real,
+    max_d: Real,
+    robust: bool,
+) -> (Vec<Real>, Vec<Real>, Vec<usize>) {
+    let identity = || {
+        (
+            vec![0.0 as Real; n_bins],
+            vec![0.0 as Real; n_bins],
+            vec![0usize; n_bins],
+        )
+    };
+    (0..n)
+        .into_par_iter()
+        .fold(identity, |mut acc, i| {
+            let (dist_sums, value_sums, counts) = &mut acc;
+            for j in (i + 1)..n {
+                let d = anisotropy.anisotropic_distance(coords[i], coords[j]) as Real;
+                if d >= max_d {
+                    continue;
+                }
+                let bin = (d / bin_width).floor() as usize;
+                if bin >= n_bins {
+                    continue;
+                }
+                let dz = (values[i] - values[j]).abs();
+                let g = if robust { dz.sqrt() } else { 0.5 * dz * dz };
+                dist_sums[bin] += d;
+                value_sums[bin] += g;
+                counts[bin] += 1;
+            }
+            acc
+        })
+        .reduce(identity, |mut a, b| {
+            for k in 0..n_bins {
+                a.0[k] += b.0[k];
+                a.1[k] += b.1[k];
+                a.2[k] += b.2[k];
+            }
+            a
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn accumulate_pairs(
+    n: usize,
+    coords: &[Coord3D],
+    values: &[Real],
+    anisotropy: &Anisotropy3D,
+    n_bins: usize,
+    bin_width: Real,
+    max_d: Real,
+    robust: bool,
+) -> (Vec<Real>, Vec<Real>, Vec<usize>) {
+    let mut dist_sums = vec![0.0 as Real; n_bins];
+    let mut value_sums = vec![0.0 as Real; n_bins];
+    let mut counts = vec![0usize; n_bins];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = anisotropy.anisotropic_distance(coords[i], coords[j]) as Real;
+            if d >= max_d {
+                continue;
+            }
+            let bin = (d / bin_width).floor() as usize;
+            if bin >= n_bins {
+                continue;
+            }
+            let dz = (values[i] - values[j]).abs();
+            let g = if robust { dz.sqrt() } else { 0.5 * dz * dz };
+            dist_sums[bin] += d;
+            value_sums[bin] += g;
+            counts[bin] += 1;
+        }
+    }
+    (dist_sums, value_sums, counts)
 }
 
 #[cfg(test)]

@@ -35,6 +35,21 @@
 //! we **skip the cell** (leaving it at NaN in the realization). The
 //! closure receives a `&[Real]` slice with NaN at unsimulated cells;
 //! callers can decide whether to treat that as a hard error.
+//!
+//! ## Parallel variant
+//!
+//! [`gaussian_simulation_3d_stream_parallel`] runs realizations
+//! concurrently on rayon's thread pool (native only). Each realization
+//! gets a deterministic seed derived from the base seed and its
+//! realization index, so same-seed-bit-identical-realization still
+//! holds *per realization*. The closure is called in realization-index
+//! order; up to `rayon::current_num_threads()` realizations are held
+//! in memory at peak (vs 1 for the serial path).
+//!
+//! Note: parallel and serial paths produce **different bytes** for the
+//! same base seed because the parallel path derives each
+//! realization's seed independently (`mix(base_seed, r)`) while the
+//! serial path threads one RNG through all realizations.
 
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
@@ -223,123 +238,271 @@ where
 
     let config = SgsConfig::default();
     let n_cells = grid.n_cells();
-    let n_samples = model.sample_coords.len();
 
-    // Reusable buffers (allocate once, reuse across realizations).
+    // Reusable scratch buffers (allocate once, reuse across realizations).
+    let mut path: Vec<usize> = Vec::with_capacity(n_cells);
     let mut grid_scores = vec![Real::NAN; n_cells];
     let mut grid_values = vec![Real::NAN; n_cells];
-    let mut path: Vec<usize> = (0..n_cells).collect();
 
-    // Single RNG threaded explicitly; all randomness comes from here.
+    // Single RNG threaded explicitly through the whole loop; this is
+    // the serial path's determinism guarantee.
     let mut rng = Rng::new(seed);
 
     for r in 0..n_realizations {
-        // 1) Random path: Fisher-Yates shuffle in place. Deterministic
-        //    given the RNG state.
-        path.iter_mut().enumerate().for_each(|(i, x)| *x = i);
-        for i in (1..n_cells).rev() {
-            // Uniform in 0..=i.
-            let r_u = rng.next_u64() % ((i as u64) + 1);
-            path.swap(i, r_u as usize);
-        }
-
-        // 2) Reset score buffer to NaN for this realization.
-        grid_scores.iter_mut().for_each(|s| *s = Real::NAN);
-
-        // 3) Build conditioning kd-tree pre-allocated for the final
-        //    size (samples + grid cells). Also a parallel Vec<Real> of
-        //    conditioning scores so the SK solver has the values for
-        //    its known set of indices.
-        let mut tree =
-            MutableKdTree3D::with_capacity(model.anisotropy, n_samples + n_cells);
-        let mut cond_coords: Vec<Coord3D> = Vec::with_capacity(n_samples + n_cells);
-        let mut cond_scores: Vec<Real> = Vec::with_capacity(n_samples + n_cells);
-        for (c, s) in model
-            .sample_coords
-            .iter()
-            .zip(model.sample_scores.iter())
-        {
-            tree.add(*c);
-            cond_coords.push(*c);
-            cond_scores.push(*s);
-        }
-
-        // 4) Walk the path, simulating one cell at a time.
-        for &cell_linear in &path {
-            let target = grid.cell_center_linear(cell_linear);
-            let neighbours = tree.nearest_n(target, config.max_neighbors);
-            if neighbours.len() < 2 {
-                // Can't build a meaningful kriging system; leave NaN
-                // and consume the RNG anyway so realizations remain
-                // deterministic regardless of solver outcomes.
-                let _ = rng.next_standard_normal();
-                continue;
-            }
-            let n_neigh = neighbours.len();
-            let mut samples = Vec::with_capacity(n_neigh);
-            let mut values = Vec::with_capacity(n_neigh);
-            for nb in &neighbours {
-                samples.push(cond_coords[nb.index]);
-                values.push(cond_scores[nb.index]);
-            }
-
-            let prediction_result = solve_simple_kriging_3d(
-                &samples,
-                &values,
-                0.0 as Real, // SK mean in score space is zero by construction.
-                target,
-                &model.anisotropy,
-                &model.variogram_score,
-                &config.solver,
-            );
-
-            let u = rng.next_standard_normal();
-            let simulated_score = match prediction_result {
-                Ok(pred) => {
-                    let sigma = (pred.variance as f64).max(0.0).sqrt() as Real;
-                    pred.value + sigma * u
-                }
-                Err(SolverFailure::NonFiniteWeights)
-                | Err(SolverFailure::PoorlyConditioned { .. })
-                | Err(SolverFailure::NonSingularEvenAfterInflation { .. }) => {
-                    // No-silent-failure gate (v3): we deliberately
-                    // leave NaN at this cell rather than producing a
-                    // garbage value. The realization continues.
-                    Real::NAN
-                }
-            };
-
-            grid_scores[cell_linear] = simulated_score;
-
-            // Add this simulated cell to the conditioning set so later
-            // path entries can use it.
-            if simulated_score.is_finite() {
-                tree.add(target);
-                cond_coords.push(target);
-                cond_scores.push(simulated_score);
-            }
-        }
-
-        // 5) Optionally back-transform: scores -> data-space values.
-        let output_slice = match output_space {
-            SgsOutputSpace::DataSpace => {
-                for (out, s) in grid_values.iter_mut().zip(grid_scores.iter()) {
-                    *out = if s.is_finite() {
-                        model.nst.backward(*s)
-                    } else {
-                        Real::NAN
-                    };
-                }
-                &grid_values[..]
-            }
-            SgsOutputSpace::ScoreSpace => &grid_scores[..],
-        };
-
-        // 6) Yield to caller.
+        run_one_realization(
+            model,
+            grid,
+            &config,
+            &mut rng,
+            &mut path,
+            &mut grid_scores,
+        );
+        let output_slice =
+            finalize_output(output_space, model, &grid_scores, &mut grid_values);
         on_realization(r, output_slice)?;
     }
 
     Ok(())
+}
+
+/// Run SGS realizations in parallel on rayon's thread pool. Native
+/// only — WASM falls back to the serial path.
+///
+/// Each realization derives its own RNG from the base seed using
+/// splitmix64 mixing: `realization_seed(r) = mix(base_seed, r)`. The
+/// closure is invoked in **realization-index order**; up to
+/// `rayon::current_num_threads()` realizations are held in memory at
+/// peak (vs 1 for the serial path).
+///
+/// Same-seed-bit-identical-realization still holds *per realization
+/// index*: running the same input twice produces the same bytes per
+/// realization. However, **bytes do not match the serial path** for
+/// the same base seed (different per-realization seed-derivation
+/// schemes).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn gaussian_simulation_3d_stream_parallel<F>(
+    model: &SgsModel3D,
+    grid: &Grid3D,
+    seed: u64,
+    n_realizations: usize,
+    output_space: SgsOutputSpace,
+    mut on_realization: F,
+) -> Result<(), SgsError>
+where
+    F: FnMut(usize, &[Real]) -> Result<(), SgsError>,
+{
+    use rayon::prelude::*;
+
+    if n_realizations == 0 {
+        return Err(SgsError::InvalidInput("n_realizations must be > 0".into()));
+    }
+
+    let n_cells = grid.n_cells();
+
+    // Process in chunks of `chunk_size` realizations so memory is
+    // bounded (chunk_size * n_cells * sizeof(Real)) instead of
+    // n_realizations * that. The chunk equals the thread count so each
+    // thread gets one realization per chunk on average.
+    let chunk_size = rayon::current_num_threads().max(1);
+
+    let mut idx = 0;
+    while idx < n_realizations {
+        let end = (idx + chunk_size).min(n_realizations);
+        let realizations: Vec<Vec<Real>> = (idx..end)
+            .into_par_iter()
+            .map(|r| {
+                let mut rng = Rng::new(splitmix64_mix(seed, r as u64));
+                let config = SgsConfig::default();
+                let mut path: Vec<usize> = Vec::with_capacity(n_cells);
+                let mut grid_scores = vec![Real::NAN; n_cells];
+                run_one_realization(
+                    model,
+                    grid,
+                    &config,
+                    &mut rng,
+                    &mut path,
+                    &mut grid_scores,
+                );
+                let mut grid_values = vec![Real::NAN; n_cells];
+                let _ = finalize_output(
+                    output_space,
+                    model,
+                    &grid_scores,
+                    &mut grid_values,
+                );
+                match output_space {
+                    SgsOutputSpace::DataSpace => grid_values,
+                    SgsOutputSpace::ScoreSpace => grid_scores,
+                }
+            })
+            .collect();
+
+        for (offset, grid_buf) in realizations.into_iter().enumerate() {
+            on_realization(idx + offset, &grid_buf)?;
+        }
+        idx = end;
+    }
+
+    Ok(())
+}
+
+/// WASM (single-threaded) fallback for the parallel SGS entry point.
+/// Delegates straight to the serial path so callers can `use` the
+/// parallel function name unconditionally without `cfg`-gating their
+/// own code.
+#[cfg(target_arch = "wasm32")]
+pub fn gaussian_simulation_3d_stream_parallel<F>(
+    model: &SgsModel3D,
+    grid: &Grid3D,
+    seed: u64,
+    n_realizations: usize,
+    output_space: SgsOutputSpace,
+    on_realization: F,
+) -> Result<(), SgsError>
+where
+    F: FnMut(usize, &[Real]) -> Result<(), SgsError>,
+{
+    gaussian_simulation_3d_stream_with(
+        model,
+        grid,
+        seed,
+        n_realizations,
+        output_space,
+        on_realization,
+    )
+}
+
+/// splitmix64 used to derive a per-realization seed from a base seed
+/// and a realization index. Different from the xoshiro RNG itself —
+/// this is just the diffusion function used for seed derivation, so
+/// `(seed, 0)` and `(seed, 1)` produce uncorrelated streams.
+#[inline]
+fn splitmix64_mix(base: u64, idx: u64) -> u64 {
+    let mut z = base.wrapping_add(idx).wrapping_add(0x9E3779B97F4A7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
+/// Simulate one realization into `grid_scores`. The caller owns the
+/// RNG and scratch buffers so this function allocates nothing on the
+/// realization-hot path beyond the per-cell SK system Vecs.
+fn run_one_realization(
+    model: &SgsModel3D,
+    grid: &Grid3D,
+    config: &SgsConfig,
+    rng: &mut Rng,
+    path: &mut Vec<usize>,
+    grid_scores: &mut [Real],
+) {
+    let n_cells = grid.n_cells();
+    let n_samples = model.sample_coords.len();
+
+    // 1) Random path: Fisher-Yates shuffle. Deterministic given RNG state.
+    path.clear();
+    path.extend(0..n_cells);
+    for i in (1..n_cells).rev() {
+        let r_u = rng.next_u64() % ((i as u64) + 1);
+        path.swap(i, r_u as usize);
+    }
+
+    // 2) Reset score buffer to NaN for this realization.
+    for s in grid_scores.iter_mut() {
+        *s = Real::NAN;
+    }
+
+    // 3) Build conditioning kd-tree pre-allocated for the final
+    //    size (samples + grid cells). Also a parallel Vec<Real> of
+    //    conditioning scores so the SK solver has the values for
+    //    its known set of indices.
+    let mut tree = MutableKdTree3D::with_capacity(model.anisotropy, n_samples + n_cells);
+    let mut cond_coords: Vec<Coord3D> = Vec::with_capacity(n_samples + n_cells);
+    let mut cond_scores: Vec<Real> = Vec::with_capacity(n_samples + n_cells);
+    for (c, s) in model
+        .sample_coords
+        .iter()
+        .zip(model.sample_scores.iter())
+    {
+        tree.add(*c);
+        cond_coords.push(*c);
+        cond_scores.push(*s);
+    }
+
+    // 4) Walk the path, simulating one cell at a time.
+    for &cell_linear in path.iter() {
+        let target = grid.cell_center_linear(cell_linear);
+        let neighbours = tree.nearest_n(target, config.max_neighbors);
+        if neighbours.len() < 2 {
+            // Consume the RNG anyway so realizations stay deterministic
+            // regardless of which solver outcomes occur.
+            let _ = rng.next_standard_normal();
+            continue;
+        }
+        let n_neigh = neighbours.len();
+        let mut samples = Vec::with_capacity(n_neigh);
+        let mut values = Vec::with_capacity(n_neigh);
+        for nb in &neighbours {
+            samples.push(cond_coords[nb.index]);
+            values.push(cond_scores[nb.index]);
+        }
+
+        let prediction_result = solve_simple_kriging_3d(
+            &samples,
+            &values,
+            0.0 as Real, // SK mean in score space is zero by construction.
+            target,
+            &model.anisotropy,
+            &model.variogram_score,
+            &config.solver,
+        );
+
+        let u = rng.next_standard_normal();
+        let simulated_score = match prediction_result {
+            Ok(pred) => {
+                let sigma = (pred.variance as f64).max(0.0).sqrt() as Real;
+                pred.value + sigma * u
+            }
+            Err(SolverFailure::NonFiniteWeights)
+            | Err(SolverFailure::PoorlyConditioned { .. })
+            | Err(SolverFailure::NonSingularEvenAfterInflation { .. }) => {
+                // No-silent-failure gate: leave NaN at this cell rather
+                // than producing a garbage value. The realization continues.
+                Real::NAN
+            }
+        };
+
+        grid_scores[cell_linear] = simulated_score;
+
+        if simulated_score.is_finite() {
+            tree.add(target);
+            cond_coords.push(target);
+            cond_scores.push(simulated_score);
+        }
+    }
+}
+
+/// Translate `grid_scores` into the caller's chosen output space.
+/// Returns a reference into either `grid_scores` (ScoreSpace) or the
+/// freshly back-transformed `grid_values` (DataSpace).
+fn finalize_output<'a>(
+    output_space: SgsOutputSpace,
+    model: &SgsModel3D,
+    grid_scores: &'a [Real],
+    grid_values: &'a mut [Real],
+) -> &'a [Real] {
+    match output_space {
+        SgsOutputSpace::DataSpace => {
+            for (out, s) in grid_values.iter_mut().zip(grid_scores.iter()) {
+                *out = if s.is_finite() {
+                    model.nst.backward(*s)
+                } else {
+                    Real::NAN
+                };
+            }
+            grid_values
+        }
+        SgsOutputSpace::ScoreSpace => grid_scores,
+    }
 }
 
 #[cfg(test)]
@@ -496,5 +659,135 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    // ---------- Parallel SGS tests (native only) ----------
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parallel_same_seed_per_realization_is_bit_identical() {
+        let model =
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
+                .unwrap();
+        let grid = small_grid();
+
+        let mut first: Vec<Vec<Real>> = Vec::new();
+        gaussian_simulation_3d_stream_parallel(
+            &model,
+            &grid,
+            7777,
+            4,
+            SgsOutputSpace::DataSpace,
+            |_, gv| {
+                first.push(gv.to_vec());
+                Ok(())
+            },
+        )
+        .unwrap();
+        let mut second: Vec<Vec<Real>> = Vec::new();
+        gaussian_simulation_3d_stream_parallel(
+            &model,
+            &grid,
+            7777,
+            4,
+            SgsOutputSpace::DataSpace,
+            |_, gv| {
+                second.push(gv.to_vec());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.len(), 4);
+        assert_eq!(second.len(), 4);
+        for r in 0..4 {
+            assert_eq!(first[r].len(), second[r].len(), "realization {r} length");
+            for (i, (a, b)) in first[r].iter().zip(second[r].iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "realization {r}, cell {i}: a={a} b={b}",
+                );
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parallel_callback_fires_in_realization_index_order() {
+        let model =
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
+                .unwrap();
+        let grid = small_grid();
+
+        let mut indices: Vec<usize> = Vec::new();
+        gaussian_simulation_3d_stream_parallel(
+            &model,
+            &grid,
+            42,
+            10,
+            SgsOutputSpace::ScoreSpace,
+            |idx, _| {
+                indices.push(idx);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(indices, (0..10).collect::<Vec<_>>());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parallel_different_realization_indices_produce_different_grids() {
+        // Same base seed, different realization indices. Each
+        // realization must produce a *different* grid (no collision
+        // in the per-realization seed derivation).
+        let model =
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
+                .unwrap();
+        let grid = small_grid();
+
+        let mut grids: Vec<Vec<Real>> = Vec::new();
+        gaussian_simulation_3d_stream_parallel(
+            &model,
+            &grid,
+            13579,
+            3,
+            SgsOutputSpace::ScoreSpace,
+            |_, gv| {
+                grids.push(gv.to_vec());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(grids.len(), 3);
+        let same_01 = grids[0] == grids[1];
+        let same_02 = grids[0] == grids[2];
+        assert!(!same_01, "realizations 0 and 1 should differ");
+        assert!(!same_02, "realizations 0 and 2 should differ");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parallel_callback_abort_propagates() {
+        let model =
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
+                .unwrap();
+        let grid = small_grid();
+        let result = gaussian_simulation_3d_stream_parallel(
+            &model,
+            &grid,
+            1,
+            5,
+            SgsOutputSpace::DataSpace,
+            |idx, _| {
+                if idx == 2 {
+                    Err(SgsError::CallbackAborted("test".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(matches!(result, Err(SgsError::CallbackAborted(_))));
     }
 }

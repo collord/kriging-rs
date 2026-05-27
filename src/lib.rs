@@ -152,7 +152,8 @@ pub use kriging::simple_3d::SimpleKrigingModel3D;
 pub use kriging::universal_3d::{Trend3D, UniversalKrigingModel3D};
 pub use simulation_3d::{
     Grid3D, NormalScoreTransform, SgsConfig, SgsError, SgsModel3D, SgsOutputSpace,
-    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_with,
+    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_parallel,
+    gaussian_simulation_3d_stream_with,
 };
 pub use kriging::simple::SimpleKrigingModel;
 pub use kriging::solver::{
