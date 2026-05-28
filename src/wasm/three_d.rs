@@ -32,6 +32,11 @@ use crate::planar_dataset_3d::PlanarDataset3D;
 use crate::simulation_3d::{
     Grid3D, SgsError, SgsModel3D, SgsOutputSpace, gaussian_simulation_3d_stream_with,
 };
+use crate::variogram::directional_3d::{
+    DirectionalConfig3D, compute_directional_variogram_3d,
+};
+use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal};
+use crate::interop::gslib_directional::GslibDirection;
 use super::{coded_err, kriging_err_to_js, parse_variogram, set_object_field};
 
 // ---------- shared helpers ----------
@@ -516,6 +521,85 @@ pub fn wasm_gaussian_simulation_3d(
         },
     )
     .map_err(sgs_err_to_js)
+}
+
+// ---------- Directional variogram (3-D) ----------
+
+/// Compute a 3-D experimental directional variogram using gamv-style
+/// lag-centred binning and a cone+bandwidth direction filter.
+///
+/// Pass `atol = 90.0, dtol = 90.0, bandh = bandv = 1.0e10` for an
+/// omnidirectional variogram (the engine sets the `omni` flag
+/// automatically and double-counts pairs to match GSLib `gamv`).
+///
+/// Returns `Object { distances, semivariances, nPairs }` as parallel
+/// `Float64Array`s aligned by lag index; empty lags are omitted (so
+/// the array length is the count of non-empty bins, ≤ `nLags`).
+#[wasm_bindgen(js_name = computeDirectionalVariogram3D)]
+pub fn wasm_compute_directional_variogram_3d(
+    xs: &[f64],
+    ys: &[f64],
+    zs: &[f64],
+    values: &[f64],
+    xlag: f64,
+    xltol: f64,
+    n_lags: usize,
+    azm_deg: f64,
+    atol_deg: f64,
+    bandh: f64,
+    dip_deg: f64,
+    dtol_deg: f64,
+    bandv: f64,
+) -> Result<JsValue, JsValue> {
+    if values.len() != xs.len() {
+        return Err(coded_err(
+            "values must have the same length as xs/ys/zs",
+            "mismatched_arrays",
+        ));
+    }
+    let coords = to_coords_3d(xs, ys, zs)?;
+    let dataset =
+        PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
+    let filter = GslibDirection {
+        azm_deg,
+        atol_deg,
+        bandh,
+        dip_deg,
+        dtol_deg,
+        bandv,
+    }
+    .to_filter()
+    .map_err(kriging_err_to_js)?;
+    let config = DirectionalConfig3D {
+        xlag: PositiveReal::try_new(xlag as Real).map_err(kriging_err_to_js)?,
+        xltol: PositiveReal::try_new(xltol as Real).map_err(kriging_err_to_js)?,
+        n_lags,
+        estimator: EmpiricalEstimator::Classical,
+    };
+    let ev = compute_directional_variogram_3d(&dataset, &filter, &config)
+        .map_err(kriging_err_to_js)?;
+
+    let distances: Vec<f64> = ev.distances.iter().map(|d| *d as f64).collect();
+    let semivariances: Vec<f64> = ev.semivariances.iter().map(|g| *g as f64).collect();
+    let n_pairs: Vec<f64> = ev.n_pairs.iter().map(|n| *n as f64).collect();
+
+    let obj = Object::new();
+    set_object_field(
+        &obj,
+        "distances",
+        &Float64Array::from(distances.as_slice()).into(),
+    )?;
+    set_object_field(
+        &obj,
+        "semivariances",
+        &Float64Array::from(semivariances.as_slice()).into(),
+    )?;
+    set_object_field(
+        &obj,
+        "nPairs",
+        &Float64Array::from(n_pairs.as_slice()).into(),
+    )?;
+    Ok(obj.into())
 }
 
 fn sgs_err_to_js(err: SgsError) -> JsValue {
