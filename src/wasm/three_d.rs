@@ -618,3 +618,91 @@ fn sgs_err_to_js(err: SgsError) -> JsValue {
     obj.into()
 }
 
+// ---------- 3-D spherical joint fit ----------
+
+/// Joint least-squares fit of a 3-D anisotropic spherical variogram
+/// across three axis-aligned experimental variograms (major / minor /
+/// vertical). Each input is `(distances, semivariances, nPairs)` as
+/// parallel typed arrays. n_pairs weight the bins; bins with more
+/// pairs contribute more to the loss.
+///
+/// Returns `Object { nugget, sill, rangeMajor, rangeMinor,
+/// rangeVertical, residuals }`. The five parameters together
+/// constitute a 3-D anisotropic spherical model that can drive
+/// kriging via the existing Anisotropy3D + spherical VariogramModel
+/// types.
+#[wasm_bindgen(js_name = fitSpherical3DJoint)]
+pub fn wasm_fit_spherical_3d_joint(
+    major_distances: &[f64],
+    major_semivariances: &[f64],
+    major_n_pairs: &[f64],
+    minor_distances: &[f64],
+    minor_semivariances: &[f64],
+    minor_n_pairs: &[f64],
+    vertical_distances: &[f64],
+    vertical_semivariances: &[f64],
+    vertical_n_pairs: &[f64],
+) -> Result<JsValue, JsValue> {
+    let build = |name: &str,
+                 distances: &[f64],
+                 semivariances: &[f64],
+                 n_pairs: &[f64]|
+     -> Result<crate::variogram::empirical::EmpiricalVariogram, JsValue> {
+        if distances.len() != semivariances.len() || distances.len() != n_pairs.len() {
+            return Err(coded_err(
+                &format!(
+                    "{name} variogram arrays must have matching lengths (got {} / {} / {})",
+                    distances.len(),
+                    semivariances.len(),
+                    n_pairs.len(),
+                ),
+                "mismatched_arrays",
+            ));
+        }
+        Ok(crate::variogram::empirical::EmpiricalVariogram {
+            distances: distances.iter().map(|d| *d as Real).collect(),
+            semivariances: semivariances.iter().map(|g| *g as Real).collect(),
+            // n_pairs come in as f64 from JS (typed arrays can't carry
+            // usize); round-trip through f64 -> usize, clamping negatives
+            // to zero (which would naturally drop the bin's weight).
+            n_pairs: n_pairs.iter().map(|n| n.max(0.0) as usize).collect(),
+        })
+    };
+    let major = build("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor = build("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let vertical = build(
+        "vertical",
+        vertical_distances,
+        vertical_semivariances,
+        vertical_n_pairs,
+    )?;
+
+    let fit = crate::variogram::fitting::fit_spherical_3d_joint(&major, &minor, &vertical)
+        .map_err(kriging_err_to_js)?;
+
+    let obj = Object::new();
+    set_object_field(&obj, "nugget", &JsValue::from_f64(fit.nugget as f64))?;
+    set_object_field(&obj, "sill", &JsValue::from_f64(fit.sill as f64))?;
+    set_object_field(
+        &obj,
+        "rangeMajor",
+        &JsValue::from_f64(fit.range_major as f64),
+    )?;
+    set_object_field(
+        &obj,
+        "rangeMinor",
+        &JsValue::from_f64(fit.range_minor as f64),
+    )?;
+    set_object_field(
+        &obj,
+        "rangeVertical",
+        &JsValue::from_f64(fit.range_vertical as f64),
+    )?;
+    set_object_field(
+        &obj,
+        "residuals",
+        &JsValue::from_f64(fit.residuals as f64),
+    )?;
+    Ok(obj.into())
+}
+
