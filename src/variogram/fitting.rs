@@ -520,6 +520,467 @@ pub fn fit_spherical_3d_joint(
     })
 }
 
+// -----------------------------------------------------------------------------
+// Two-stage 3-D spherical fit.
+// -----------------------------------------------------------------------------
+
+/// Two-stage spherical fit that respects the asymmetric information
+/// content of the three axes on drillhole data.
+///
+/// **Why this is different from `fit_spherical_3d_joint`.** The joint
+/// fit weights every bin on every axis by its pair count. On typical
+/// drillhole data the horizontal axes have *no bins* at short lags
+/// -- well spacing puts the first cross-well pair distance hundreds
+/// of metres out, so the rise from γ = 0 to sill in the horizontal
+/// plots is interpolated, not observed. Meanwhile the vertical axis
+/// has dense short-lag bins (samples within one borehole). The joint
+/// fit drives the nugget toward zero because the only "evidence"
+/// near h = 0 is the smooth-interpolation-through-(0,0) implied by
+/// the unsupported horizontal curves.
+///
+/// The two-stage approach mirrors standard practice in Pyrcz &
+/// Deutsch (2014) §6.3.2 and Goovaerts (1997) §4.2: estimate the
+/// nugget from the **vertical** axis (where short-lag pairs exist),
+/// then fit the horizontal ranges with that nugget held fixed.
+///
+/// Stage 1 fits nugget + sill + range_vertical on the vertical
+/// experimental alone (3-D Nelder-Mead). Stage 2 holds nugget + sill
+/// from stage 1 and fits range_major + range_minor against the
+/// horizontal experimentals (2-D Nelder-Mead).
+///
+/// The returned `residuals` is the sum of stage 1 residuals (vertical
+/// only) and stage 2 residuals (major + minor only) -- comparable
+/// across calls with the same input but not directly comparable to
+/// the joint fit's residual (which sums all three axes against the
+/// same model).
+/// `data_variance` is the sample variance of the underlying data,
+/// used to anchor the sill in stage 1. Required because the vertical
+/// experimental often hasn't reached sill within the user's max-lag
+/// (it's still climbing at the right edge), leaving sill
+/// under-constrained -- the fitter then slides along a
+/// "shrink nugget / grow sill" ridge to fit the rising shape,
+/// producing implausibly low nuggets. Anchoring sill at the data
+/// variance follows GSLIB / Goovaerts 1997 §4.2 ("the sill of an
+/// unbounded experimental variogram is taken as the sample
+/// variance"). Pass 0 to opt out (treat sill as fully free).
+pub fn fit_spherical_3d_two_stage(
+    major: &EmpiricalVariogram,
+    minor: &EmpiricalVariogram,
+    vertical: &EmpiricalVariogram,
+    data_variance: Real,
+) -> Result<Spherical3DJointFit, KrigingError> {
+    for (name, ev) in [("major", major), ("minor", minor), ("vertical", vertical)] {
+        if ev.distances.is_empty() {
+            return Err(KrigingError::FittingError(format!(
+                "{name} experimental variogram is empty"
+            )));
+        }
+        if ev.distances.len() != ev.semivariances.len()
+            || ev.distances.len() != ev.n_pairs.len()
+        {
+            return Err(KrigingError::FittingError(format!(
+                "{name} experimental variogram has mismatched array lengths"
+            )));
+        }
+    }
+
+    // Stage 1: fit nugget + range_vertical on vertical alone, with
+    // sill held at the data's sample variance. When data_variance
+    // is non-positive (caller opted out), fall back to a free sill
+    // 3-D fit on the vertical -- which is the under-constrained
+    // path that motivated this anchor in the first place.
+    let (n0, _s0, r0_v) = initial_axis_guess(vertical);
+    let sill_anchor = if data_variance > 0.0 { data_variance } else { 0.0 };
+
+    let (nugget_fit, sill_fit, range_vertical_fit) = if sill_anchor > 0.0 {
+        // Anchored 2-D fit: nugget + range_vertical only.
+        let stage1_eval = |p: [Real; 2]| -> Real {
+            let (nugget, range) = (p[0], p[1]);
+            if !nugget.is_finite() || !range.is_finite() {
+                return Real::INFINITY;
+            }
+            if nugget < 0.0 || nugget >= sill_anchor || range <= 0.0 {
+                return Real::INFINITY;
+            }
+            axis_residuals(vertical, nugget, sill_anchor, range)
+        };
+        let start: [Real; 2] = [
+            n0.max(0.0).min(sill_anchor * 0.5),
+            r0_v.max(Real::EPSILON),
+        ];
+        let steps = [
+            (sill_anchor * 0.05).max(1e-6),
+            (start[1] * 0.10).max(1e-6),
+        ];
+        let best = nelder_mead_2d(start, steps, 128, &stage1_eval);
+        if !best.1.is_finite() {
+            return Err(KrigingError::FittingError(
+                "two-stage fit: anchored vertical fit did not converge".to_string(),
+            ));
+        }
+        (best.0[0], sill_anchor, best.0[1])
+    } else {
+        // Unanchored 3-D fit (original behaviour).
+        let stage1_eval = |p: [Real; 3]| -> Real {
+            let (nugget, sill, range) = (p[0], p[1], p[2]);
+            if !nugget.is_finite() || !sill.is_finite() || !range.is_finite() {
+                return Real::INFINITY;
+            }
+            if nugget < 0.0 || sill <= nugget || range <= 0.0 {
+                return Real::INFINITY;
+            }
+            axis_residuals(vertical, nugget, sill, range)
+        };
+        let s0 = initial_axis_guess(vertical).1;
+        let start: [Real; 3] = [
+            n0.max(0.0),
+            s0.max(n0 + Real::EPSILON),
+            r0_v.max(Real::EPSILON),
+        ];
+        let steps = [
+            (start[1] * 0.05).max(1e-6),
+            (start[1] * 0.10).max(1e-6),
+            (start[2] * 0.10).max(1e-6),
+        ];
+        let best = nelder_mead_3d(start, steps, 128, &stage1_eval);
+        if !best.1.is_finite() {
+            return Err(KrigingError::FittingError(
+                "two-stage fit: unanchored vertical fit did not converge".to_string(),
+            ));
+        }
+        (best.0[0], best.0[1], best.0[2])
+    };
+
+    // Stage 2: nugget and sill fixed; fit (range_major, range_minor).
+    let (_, _, r0_maj) = initial_axis_guess(major);
+    let (_, _, r0_min) = initial_axis_guess(minor);
+    let stage2_eval = |p: [Real; 2]| -> Real {
+        let (range_major, range_minor) = (p[0], p[1]);
+        if !range_major.is_finite() || !range_minor.is_finite() {
+            return Real::INFINITY;
+        }
+        if range_major <= 0.0 || range_minor <= 0.0 {
+            return Real::INFINITY;
+        }
+        axis_residuals(major, nugget_fit, sill_fit, range_major)
+            + axis_residuals(minor, nugget_fit, sill_fit, range_minor)
+    };
+    let stage2_start: [Real; 2] = [r0_maj.max(Real::EPSILON), r0_min.max(Real::EPSILON)];
+    let stage2_steps = [
+        (stage2_start[0] * 0.10).max(1e-6),
+        (stage2_start[1] * 0.10).max(1e-6),
+    ];
+    let stage2_best = nelder_mead_2d(stage2_start, stage2_steps, 128, &stage2_eval);
+    if !stage2_best.1.is_finite() {
+        return Err(KrigingError::FittingError(
+            "two-stage fit: horizontal-range fit did not converge".to_string(),
+        ));
+    }
+
+    // Recompute stage 1's residuals from the final parameters so the
+    // returned value covers both the anchored-2D and unanchored-3D
+    // branches uniformly.
+    let stage1_residuals = axis_residuals(vertical, nugget_fit, sill_fit, range_vertical_fit);
+    Ok(Spherical3DJointFit {
+        nugget: nugget_fit,
+        sill: sill_fit,
+        range_major: stage2_best.0[0],
+        range_minor: stage2_best.0[1],
+        range_vertical: range_vertical_fit,
+        residuals: stage1_residuals + stage2_best.1,
+    })
+}
+
+/// Refit the spherical model with `nugget` held at a user-supplied
+/// value (typically the user has overridden the auto-derived nugget
+/// from `fit_spherical_3d_two_stage` to better match their reading
+/// of the vertical's short-lag intercept). Fits sill plus all three
+/// ranges via 4-D Nelder-Mead against all three axes simultaneously,
+/// pair-weighted just like the joint fit.
+pub fn fit_spherical_3d_with_fixed_nugget(
+    major: &EmpiricalVariogram,
+    minor: &EmpiricalVariogram,
+    vertical: &EmpiricalVariogram,
+    nugget: Real,
+) -> Result<Spherical3DJointFit, KrigingError> {
+    for (name, ev) in [("major", major), ("minor", minor), ("vertical", vertical)] {
+        if ev.distances.is_empty() {
+            return Err(KrigingError::FittingError(format!(
+                "{name} experimental variogram is empty"
+            )));
+        }
+        if ev.distances.len() != ev.semivariances.len()
+            || ev.distances.len() != ev.n_pairs.len()
+        {
+            return Err(KrigingError::FittingError(format!(
+                "{name} experimental variogram has mismatched array lengths"
+            )));
+        }
+    }
+    if !nugget.is_finite() || nugget < 0.0 {
+        return Err(KrigingError::FittingError(
+            "fixed nugget must be finite and non-negative".to_string(),
+        ));
+    }
+
+    let (_, s_maj, r_maj) = initial_axis_guess(major);
+    let (_, s_min, r_min) = initial_axis_guess(minor);
+    let (_, s_vrt, r_vrt) = initial_axis_guess(vertical);
+    let median3 = |mut a: [Real; 3]| {
+        a.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        a[1]
+    };
+    let sill0 = median3([s_maj, s_min, s_vrt]).max(nugget + Real::EPSILON);
+
+    let eval = |p: [Real; 4]| -> Real {
+        let (sill, r_major, r_minor, r_vertical) = (p[0], p[1], p[2], p[3]);
+        if !sill.is_finite() || !r_major.is_finite()
+            || !r_minor.is_finite() || !r_vertical.is_finite()
+        {
+            return Real::INFINITY;
+        }
+        if sill <= nugget || r_major <= 0.0 || r_minor <= 0.0 || r_vertical <= 0.0 {
+            return Real::INFINITY;
+        }
+        axis_residuals(major, nugget, sill, r_major)
+            + axis_residuals(minor, nugget, sill, r_minor)
+            + axis_residuals(vertical, nugget, sill, r_vertical)
+    };
+    let start: [Real; 4] = [
+        sill0,
+        r_maj.max(Real::EPSILON),
+        r_min.max(Real::EPSILON),
+        r_vrt.max(Real::EPSILON),
+    ];
+    let steps = [
+        (start[0] * 0.10).max(1e-6),
+        (start[1] * 0.10).max(1e-6),
+        (start[2] * 0.10).max(1e-6),
+        (start[3] * 0.10).max(1e-6),
+    ];
+    let best = nelder_mead_4d(start, steps, 128, &eval);
+    if !best.1.is_finite() {
+        return Err(KrigingError::FittingError(
+            "fixed-nugget fit did not converge".to_string(),
+        ));
+    }
+    Ok(Spherical3DJointFit {
+        nugget,
+        sill: best.0[0],
+        range_major: best.0[1],
+        range_minor: best.0[2],
+        range_vertical: best.0[3],
+        residuals: best.1,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Small-D Nelder-Mead helpers used by the two-stage fit and fixed-nugget refit.
+// Each loops `n_iter` reflect / expand / contract / shrink iterations on the
+// supplied closure. Inlining a fully-general N-dim version in safe Rust
+// requires more allocation than these three explicit forms.
+// -----------------------------------------------------------------------------
+
+fn nelder_mead_2d(
+    start: [Real; 2],
+    steps: [Real; 2],
+    n_iter: usize,
+    eval: &dyn Fn([Real; 2]) -> Real,
+) -> ([Real; 2], Real) {
+    let mut simplex: [([Real; 2], Real); 3] = [
+        (start, eval(start)),
+        ([start[0] + steps[0], start[1]], 0.0),
+        ([start[0], start[1] + steps[1]], 0.0),
+    ];
+    for entry in simplex.iter_mut().skip(1) {
+        entry.1 = eval(entry.0);
+    }
+    for _ in 0..n_iter {
+        simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let best = simplex[0];
+        let worst = simplex[2];
+        if !best.1.is_finite() && !worst.1.is_finite() {
+            break;
+        }
+        // Centroid of all but worst (i.e. best two).
+        let c = [
+            (simplex[0].0[0] + simplex[1].0[0]) * 0.5,
+            (simplex[0].0[1] + simplex[1].0[1]) * 0.5,
+        ];
+        let reflect = [c[0] + (c[0] - worst.0[0]), c[1] + (c[1] - worst.0[1])];
+        let r_val = eval(reflect);
+        if r_val < simplex[1].1 && r_val >= best.1 {
+            simplex[2] = (reflect, r_val);
+            continue;
+        }
+        if r_val < best.1 {
+            let expand = [c[0] + 2.0 * (c[0] - worst.0[0]), c[1] + 2.0 * (c[1] - worst.0[1])];
+            let e_val = eval(expand);
+            simplex[2] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            continue;
+        }
+        let contract = [c[0] + 0.5 * (worst.0[0] - c[0]), c[1] + 0.5 * (worst.0[1] - c[1])];
+        let cn_val = eval(contract);
+        if cn_val < worst.1 {
+            simplex[2] = (contract, cn_val);
+            continue;
+        }
+        for i in 1..3 {
+            let shrunk = [
+                best.0[0] + 0.5 * (simplex[i].0[0] - best.0[0]),
+                best.0[1] + 0.5 * (simplex[i].0[1] - best.0[1]),
+            ];
+            simplex[i] = (shrunk, eval(shrunk));
+        }
+    }
+    simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    simplex[0]
+}
+
+fn nelder_mead_3d(
+    start: [Real; 3],
+    steps: [Real; 3],
+    n_iter: usize,
+    eval: &dyn Fn([Real; 3]) -> Real,
+) -> ([Real; 3], Real) {
+    let mut simplex: [([Real; 3], Real); 4] = [
+        (start, eval(start)),
+        ([start[0] + steps[0], start[1], start[2]], 0.0),
+        ([start[0], start[1] + steps[1], start[2]], 0.0),
+        ([start[0], start[1], start[2] + steps[2]], 0.0),
+    ];
+    for entry in simplex.iter_mut().skip(1) {
+        entry.1 = eval(entry.0);
+    }
+    for _ in 0..n_iter {
+        simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let best = simplex[0];
+        let second_worst = simplex[2];
+        let worst = simplex[3];
+        if !best.1.is_finite() && !worst.1.is_finite() {
+            break;
+        }
+        // Centroid of best 3.
+        let mut c = [0.0 as Real; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                c[j] += simplex[i].0[j];
+            }
+        }
+        for j in 0..3 {
+            c[j] /= 3.0;
+        }
+        let mut reflect = [0.0 as Real; 3];
+        for j in 0..3 {
+            reflect[j] = c[j] + (c[j] - worst.0[j]);
+        }
+        let r_val = eval(reflect);
+        if r_val < second_worst.1 && r_val >= best.1 {
+            simplex[3] = (reflect, r_val);
+            continue;
+        }
+        if r_val < best.1 {
+            let mut expand = [0.0 as Real; 3];
+            for j in 0..3 {
+                expand[j] = c[j] + 2.0 * (c[j] - worst.0[j]);
+            }
+            let e_val = eval(expand);
+            simplex[3] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            continue;
+        }
+        let mut contract = [0.0 as Real; 3];
+        for j in 0..3 {
+            contract[j] = c[j] + 0.5 * (worst.0[j] - c[j]);
+        }
+        let cn_val = eval(contract);
+        if cn_val < worst.1 {
+            simplex[3] = (contract, cn_val);
+            continue;
+        }
+        for i in 1..4 {
+            let mut shrunk = [0.0 as Real; 3];
+            for j in 0..3 {
+                shrunk[j] = best.0[j] + 0.5 * (simplex[i].0[j] - best.0[j]);
+            }
+            simplex[i] = (shrunk, eval(shrunk));
+        }
+    }
+    simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    simplex[0]
+}
+
+fn nelder_mead_4d(
+    start: [Real; 4],
+    steps: [Real; 4],
+    n_iter: usize,
+    eval: &dyn Fn([Real; 4]) -> Real,
+) -> ([Real; 4], Real) {
+    let mut simplex: [([Real; 4], Real); 5] = [
+        (start, eval(start)),
+        ([start[0] + steps[0], start[1], start[2], start[3]], 0.0),
+        ([start[0], start[1] + steps[1], start[2], start[3]], 0.0),
+        ([start[0], start[1], start[2] + steps[2], start[3]], 0.0),
+        ([start[0], start[1], start[2], start[3] + steps[3]], 0.0),
+    ];
+    for entry in simplex.iter_mut().skip(1) {
+        entry.1 = eval(entry.0);
+    }
+    for _ in 0..n_iter {
+        simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let best = simplex[0];
+        let second_worst = simplex[3];
+        let worst = simplex[4];
+        if !best.1.is_finite() && !worst.1.is_finite() {
+            break;
+        }
+        let mut c = [0.0 as Real; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                c[j] += simplex[i].0[j];
+            }
+        }
+        for j in 0..4 {
+            c[j] /= 4.0;
+        }
+        let mut reflect = [0.0 as Real; 4];
+        for j in 0..4 {
+            reflect[j] = c[j] + (c[j] - worst.0[j]);
+        }
+        let r_val = eval(reflect);
+        if r_val < second_worst.1 && r_val >= best.1 {
+            simplex[4] = (reflect, r_val);
+            continue;
+        }
+        if r_val < best.1 {
+            let mut expand = [0.0 as Real; 4];
+            for j in 0..4 {
+                expand[j] = c[j] + 2.0 * (c[j] - worst.0[j]);
+            }
+            let e_val = eval(expand);
+            simplex[4] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            continue;
+        }
+        let mut contract = [0.0 as Real; 4];
+        for j in 0..4 {
+            contract[j] = c[j] + 0.5 * (worst.0[j] - c[j]);
+        }
+        let cn_val = eval(contract);
+        if cn_val < worst.1 {
+            simplex[4] = (contract, cn_val);
+            continue;
+        }
+        for i in 1..5 {
+            let mut shrunk = [0.0 as Real; 4];
+            for j in 0..4 {
+                shrunk[j] = best.0[j] + 0.5 * (simplex[i].0[j] - best.0[j]);
+            }
+            simplex[i] = (shrunk, eval(shrunk));
+        }
+    }
+    simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    simplex[0]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,6 +1188,101 @@ mod tests {
         approx::assert_relative_eq!(fit.range_major as f64, 40.0, epsilon = 2.0);
         approx::assert_relative_eq!(fit.range_minor as f64, 25.0, epsilon = 2.0);
         approx::assert_relative_eq!(fit.range_vertical as f64, 8.0, epsilon = 2.0);
+    }
+
+    #[test]
+    fn two_stage_recovers_truth_on_symmetric_data() {
+        // Sanity: when all three axes have the same true parameters and
+        // identical sampling, two-stage should land on the same answer
+        // as the joint fit (give or take stage-2's reduced DOF).
+        let lags: Vec<Real> = (1..=10).map(|i| i as Real * 5.0).collect();
+        let truth = (0.1 as Real, 1.0 as Real, 40.0 as Real);
+        let major = synth_spherical(&lags, truth.0, truth.1, truth.2);
+        let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
+        let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
+
+        // Pass the true variance as the sill anchor so the test
+        // exercises the anchored path (the common case from JS).
+        let fit = fit_spherical_3d_two_stage(&major, &minor, &vertical, truth.1).unwrap();
+        approx::assert_relative_eq!(fit.nugget as f64, truth.0 as f64, epsilon = 1e-2);
+        approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 1e-2);
+        approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
+        approx::assert_relative_eq!(fit.range_minor as f64, truth.2 as f64, epsilon = 1.0);
+        approx::assert_relative_eq!(fit.range_vertical as f64, truth.2 as f64, epsilon = 1.0);
+    }
+
+    #[test]
+    fn two_stage_recovers_nugget_when_horizontals_have_noisy_small_lag_bins() {
+        // Drillhole scenario: vertical has dense, well-supported bins
+        // including short lags (so the nugget signal is clearly
+        // visible). Horizontals have a couple of noisy small-lag bins
+        // (low γ, low pair counts) followed by well-supported bins at
+        // and past the range. The joint fit gets pulled toward
+        // nugget = 0 by the noisy small-lag horizontal bins; two-stage
+        // recovers the nugget from the vertical and holds it.
+        //
+        // This setup mirrors the oilsands case where major/minor have
+        // one or two sparse low-γ bins below the well spacing.
+        let nugget: Real = 0.2;
+        let sill: Real = 1.0;
+        let range: Real = 40.0;
+        // Vertical: 10 well-supported bins covering rising shoulder.
+        let vertical_lags: Vec<Real> = (1..=10).map(|i| i as Real * 5.0).collect();
+        let vertical = synth_spherical(&vertical_lags, nugget, sill, range);
+
+        // Horizontals: two sparse noisy small-lag bins (close to γ = 0,
+        // pair count 5 each) plus well-supported plateau bins.
+        let mut horizontal = synth_spherical(
+            &(1..=8).map(|i| 100.0 + i as Real * 30.0).collect::<Vec<_>>(),
+            nugget,
+            sill,
+            range,
+        );
+        // Prepend two sparse low-γ bins -- the kind drillhole cone-
+        // tolerance bleed produces.
+        horizontal.distances.insert(0, 30.0);
+        horizontal.semivariances.insert(0, 0.06);
+        horizontal.n_pairs.insert(0, 12);
+        horizontal.distances.insert(0, 15.0);
+        horizontal.semivariances.insert(0, 0.04);
+        horizontal.n_pairs.insert(0, 5);
+
+        let two_stage = fit_spherical_3d_two_stage(
+            &horizontal, &horizontal, &vertical, sill,
+        ).unwrap();
+        // Two-stage's nugget comes from vertical alone, so it should
+        // land near the truth.
+        approx::assert_relative_eq!(two_stage.nugget as f64, nugget as f64, epsilon = 5e-2);
+
+        // Joint fit gets pulled toward zero by the noisy small-lag
+        // bins. This snapshot documents the problem two-stage solves;
+        // remove the assertion if the joint fit gets smarter.
+        let joint = fit_spherical_3d_joint(&horizontal, &horizontal, &vertical).unwrap();
+        assert!(
+            joint.nugget < nugget * 0.5,
+            "expected joint fit to underestimate nugget on noisy small-lag bins (got {} vs true {})",
+            joint.nugget,
+            nugget
+        );
+    }
+
+    #[test]
+    fn fixed_nugget_holds_input() {
+        // Refitting with a user-supplied nugget should return exactly
+        // that nugget back, with the other parameters fit against the
+        // data.
+        let lags: Vec<Real> = (1..=10).map(|i| i as Real * 5.0).collect();
+        let truth = (0.3 as Real, 1.0 as Real, 40.0 as Real);
+        let major = synth_spherical(&lags, truth.0, truth.1, truth.2);
+        let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
+        let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
+
+        let fit = fit_spherical_3d_with_fixed_nugget(&major, &minor, &vertical, 0.3).unwrap();
+        // f32 precision: the constant 0.3 cast to f32 is not exactly 0.3;
+        // allow ulp-scale jitter.
+        approx::assert_relative_eq!(fit.nugget as f64, 0.3, epsilon = 1e-6);
+        approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 5e-2);
+        approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
     }
 
     #[test]

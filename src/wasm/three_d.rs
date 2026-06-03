@@ -643,66 +643,158 @@ pub fn wasm_fit_spherical_3d_joint(
     vertical_semivariances: &[f64],
     vertical_n_pairs: &[f64],
 ) -> Result<JsValue, JsValue> {
-    let build = |name: &str,
-                 distances: &[f64],
-                 semivariances: &[f64],
-                 n_pairs: &[f64]|
-     -> Result<crate::variogram::empirical::EmpiricalVariogram, JsValue> {
-        if distances.len() != semivariances.len() || distances.len() != n_pairs.len() {
-            return Err(coded_err(
-                &format!(
-                    "{name} variogram arrays must have matching lengths (got {} / {} / {})",
-                    distances.len(),
-                    semivariances.len(),
-                    n_pairs.len(),
-                ),
-                "mismatched_arrays",
-            ));
-        }
-        Ok(crate::variogram::empirical::EmpiricalVariogram {
-            distances: distances.iter().map(|d| *d as Real).collect(),
-            semivariances: semivariances.iter().map(|g| *g as Real).collect(),
-            // n_pairs come in as f64 from JS (typed arrays can't carry
-            // usize); round-trip through f64 -> usize, clamping negatives
-            // to zero (which would naturally drop the bin's weight).
-            n_pairs: n_pairs.iter().map(|n| n.max(0.0) as usize).collect(),
-        })
-    };
-    let major = build("major", major_distances, major_semivariances, major_n_pairs)?;
-    let minor = build("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
-    let vertical = build(
+    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let vertical = build_empirical_variogram(
         "vertical",
         vertical_distances,
         vertical_semivariances,
         vertical_n_pairs,
     )?;
-
     let fit = crate::variogram::fitting::fit_spherical_3d_joint(&major, &minor, &vertical)
         .map_err(kriging_err_to_js)?;
+    spherical_3d_fit_to_js(&fit)
+}
 
+/// Two-stage spherical fit. Fits nugget + sill + range_vertical on
+/// the vertical experimental alone, then holds those and fits the
+/// horizontal ranges -- avoids the joint fit's tendency to drive the
+/// nugget toward zero when horizontal axes have noisy short-lag bins
+/// (typical drillhole pattern; see Rust docs on
+/// `fit_spherical_3d_two_stage`). Arguments and return shape match
+/// `fitSpherical3DJoint`.
+#[wasm_bindgen(js_name = fitSpherical3DTwoStage)]
+pub fn wasm_fit_spherical_3d_two_stage(
+    major_distances: &[f64],
+    major_semivariances: &[f64],
+    major_n_pairs: &[f64],
+    minor_distances: &[f64],
+    minor_semivariances: &[f64],
+    minor_n_pairs: &[f64],
+    vertical_distances: &[f64],
+    vertical_semivariances: &[f64],
+    vertical_n_pairs: &[f64],
+    // data_variance: sample variance of the underlying data. Anchors
+    // the stage-1 sill so the vertical's not-yet-plateaued curve
+    // doesn't slide the fitter into a degenerate low-nugget /
+    // high-sill solution. Pass 0 to opt out (treat sill as fully free).
+    data_variance: f64,
+) -> Result<JsValue, JsValue> {
+    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let vertical = build_empirical_variogram(
+        "vertical",
+        vertical_distances,
+        vertical_semivariances,
+        vertical_n_pairs,
+    )?;
+    let fit = crate::variogram::fitting::fit_spherical_3d_two_stage(
+        &major, &minor, &vertical, data_variance as Real,
+    )
+    .map_err(kriging_err_to_js)?;
+    spherical_3d_fit_to_js(&fit)
+}
+
+/// Refit spherical model with nugget held at a user-supplied value.
+/// Fits sill plus three ranges. Used after a two-stage fit when the
+/// user has overridden the auto-derived nugget by reading it off the
+/// vertical's short-lag intercept manually.
+#[wasm_bindgen(js_name = fitSpherical3DFixedNugget)]
+pub fn wasm_fit_spherical_3d_fixed_nugget(
+    major_distances: &[f64],
+    major_semivariances: &[f64],
+    major_n_pairs: &[f64],
+    minor_distances: &[f64],
+    minor_semivariances: &[f64],
+    minor_n_pairs: &[f64],
+    vertical_distances: &[f64],
+    vertical_semivariances: &[f64],
+    vertical_n_pairs: &[f64],
+    nugget: f64,
+) -> Result<JsValue, JsValue> {
+    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let vertical = build_empirical_variogram(
+        "vertical",
+        vertical_distances,
+        vertical_semivariances,
+        vertical_n_pairs,
+    )?;
+    let fit = crate::variogram::fitting::fit_spherical_3d_with_fixed_nugget(
+        &major, &minor, &vertical, nugget as Real,
+    )
+    .map_err(kriging_err_to_js)?;
+    spherical_3d_fit_to_js(&fit)
+}
+
+/// Shared helper: convert JS-side per-axis arrays into an
+/// `EmpiricalVariogram`. Centralised so the three fit entry points
+/// stay symmetric.
+fn build_empirical_variogram(
+    name: &str,
+    distances: &[f64],
+    semivariances: &[f64],
+    n_pairs: &[f64],
+) -> Result<crate::variogram::empirical::EmpiricalVariogram, JsValue> {
+    if distances.len() != semivariances.len() || distances.len() != n_pairs.len() {
+        return Err(coded_err(
+            &format!(
+                "{name} variogram arrays must have matching lengths (got {} / {} / {})",
+                distances.len(),
+                semivariances.len(),
+                n_pairs.len(),
+            ),
+            "mismatched_arrays",
+        ));
+    }
+    Ok(crate::variogram::empirical::EmpiricalVariogram {
+        distances: distances.iter().map(|d| *d as Real).collect(),
+        semivariances: semivariances.iter().map(|g| *g as Real).collect(),
+        n_pairs: n_pairs.iter().map(|n| n.max(0.0) as usize).collect(),
+    })
+}
+
+/// Shared helper: convert a Rust `Spherical3DJointFit` into the JS
+/// object shape exposed by all three fit entry points.
+fn spherical_3d_fit_to_js(
+    fit: &crate::variogram::fitting::Spherical3DJointFit,
+) -> Result<JsValue, JsValue> {
     let obj = Object::new();
     set_object_field(&obj, "nugget", &JsValue::from_f64(fit.nugget as f64))?;
     set_object_field(&obj, "sill", &JsValue::from_f64(fit.sill as f64))?;
-    set_object_field(
-        &obj,
-        "rangeMajor",
-        &JsValue::from_f64(fit.range_major as f64),
-    )?;
-    set_object_field(
-        &obj,
-        "rangeMinor",
-        &JsValue::from_f64(fit.range_minor as f64),
-    )?;
-    set_object_field(
-        &obj,
-        "rangeVertical",
-        &JsValue::from_f64(fit.range_vertical as f64),
-    )?;
-    set_object_field(
-        &obj,
-        "residuals",
-        &JsValue::from_f64(fit.residuals as f64),
-    )?;
+    set_object_field(&obj, "rangeMajor", &JsValue::from_f64(fit.range_major as f64))?;
+    set_object_field(&obj, "rangeMinor", &JsValue::from_f64(fit.range_minor as f64))?;
+    set_object_field(&obj, "rangeVertical", &JsValue::from_f64(fit.range_vertical as f64))?;
+    set_object_field(&obj, "residuals", &JsValue::from_f64(fit.residuals as f64))?;
+    Ok(obj.into())
+}
+
+/// Fit a 1-D spherical model to a precomputed empirical variogram.
+/// Used by the anisotropy search to score candidate orientations by
+/// their fitted range -- more robust to single-bin noise spikes than
+/// a threshold-crossing heuristic. Cheaper than the joint 3-D fit
+/// because there are only 3 parameters and one axis worth of data.
+///
+/// Returns `{ nugget, sill, range, residuals }` (no "rangeMajor" etc.
+/// since this is 1-D).
+#[wasm_bindgen(js_name = fitSpherical1D)]
+pub fn wasm_fit_spherical_1d(
+    distances: &[f64],
+    semivariances: &[f64],
+    n_pairs: &[f64],
+) -> Result<JsValue, JsValue> {
+    let empirical = build_empirical_variogram("axis", distances, semivariances, n_pairs)?;
+    let fit = crate::variogram::fitting::fit_variogram(
+        &empirical,
+        crate::variogram::models::VariogramType::Spherical,
+    )
+    .map_err(kriging_err_to_js)?;
+    let (nugget, sill, range) = fit.model.params();
+    let obj = Object::new();
+    set_object_field(&obj, "nugget", &JsValue::from_f64(nugget as f64))?;
+    set_object_field(&obj, "sill", &JsValue::from_f64(sill as f64))?;
+    set_object_field(&obj, "range", &JsValue::from_f64(range as f64))?;
+    set_object_field(&obj, "residuals", &JsValue::from_f64(fit.residuals as f64))?;
     Ok(obj.into())
 }
 

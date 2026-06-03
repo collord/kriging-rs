@@ -160,6 +160,29 @@ type MutableTree = KdTree<f64, u64, 3, 32, u32>;
 ///
 /// API mirrors [`KdTree3D`] but each query operates on the current
 /// (live) point set rather than a snapshot.
+
+/// Deterministic, per-id tiny perturbation on each axis. Magnitude
+/// ~1e-12 (relative; scaled by coordinate magnitude at the callsite),
+/// using a splitmix-style hash of `id` so different ids get different
+/// offsets and the same id always gets the same offset.
+fn jitter_for(id: u64) -> (f64, f64, f64) {
+    let mut s = id.wrapping_add(0x9E3779B97F4A7C15);
+    let h = |z: &mut u64| -> f64 {
+        *z = z.wrapping_add(0x9E3779B97F4A7C15);
+        let mut x = *z;
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B5);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
+        x ^= x >> 31;
+        // Map to (-0.5, 0.5) range, then scale to 1e-12.
+        let u = (x as f64) / (u64::MAX as f64) - 0.5;
+        u * 1e-12
+    };
+    let jx = h(&mut s);
+    let jy = h(&mut s);
+    let jz = h(&mut s);
+    (jx, jy, jz)
+}
+
 #[derive(Debug)]
 pub struct MutableKdTree3D {
     tree: MutableTree,
@@ -202,11 +225,35 @@ impl MutableKdTree3D {
 
     /// Add a single point and return its assigned index (0-based, in
     /// insertion order).
+    ///
+    /// Applies a tiny deterministic per-insertion jitter (~1e-12 of
+    /// the larger of the coordinate magnitude or 1.0) before inserting
+    /// into kiddo's mutable kd-tree. Background: kiddo's mutable tree
+    /// panics when more than `bucket_size` (currently 32) items share
+    /// the same value on any axis. SGS callers routinely feed
+    /// axis-aligned grid cells (where dozens to hundreds of cells
+    /// share an x or y coordinate), and there is no realistic dataset
+    /// where the bucket size would be enough -- a 100x100 grid alone
+    /// has 100 colinear cells per axis. The jitter is far below
+    /// kriging-relevant precision (variogram distances start at
+    /// metres-to-kilometres, the perturbation is at the ulp scale) so
+    /// it doesn't affect nearest-neighbour ordering or kriging
+    /// solutions, but it does keep kiddo's internal bucket invariant
+    /// satisfied.
     pub fn add(&mut self, point: Coord3D) -> usize {
         let v = Vector3::new(point.x as f64, point.y as f64, point.z as f64);
         let tp = self.deformation * v;
         let id = self.next_id;
-        self.tree.add(&[tp[0], tp[1], tp[2]], id);
+        let (jx, jy, jz) = jitter_for(id);
+        // Scale jitter by max(|coord|, 1.0) so the perturbation stays
+        // ulp-sized even for large-magnitude coordinates -- a pure
+        // ~1e-12 absolute jitter would round away at distances on the
+        // order of 1e9.
+        let sx = tp[0].abs().max(1.0);
+        let sy = tp[1].abs().max(1.0);
+        let sz = tp[2].abs().max(1.0);
+        self.tree
+            .add(&[tp[0] + jx * sx, tp[1] + jy * sy, tp[2] + jz * sz], id);
         self.next_id += 1;
         id as usize
     }
@@ -244,6 +291,7 @@ impl MutableKdTree3D {
 #[cfg(test)]
 mod mutable_tests {
     use super::*;
+    use crate::Real;
     use approx::assert_relative_eq;
 
     #[test]
@@ -252,6 +300,39 @@ mod mutable_tests {
         assert_eq!(tree.size(), 0);
         let q = tree.nearest_n(Coord3D::new(0.0, 0.0, 0.0), 5);
         assert!(q.is_empty());
+    }
+
+    #[test]
+    fn dense_colinear_points_do_not_panic() {
+        // Regression: kiddo's mutable kd-tree panics when more than
+        // `bucket_size` (32) items share a position on one axis.
+        // SGS routinely feeds axis-aligned grid cells where dozens or
+        // hundreds of cells share an x or y coordinate, so the tree
+        // must add jitter before insertion to keep the bucket
+        // invariant satisfied. This test would panic without the
+        // jitter path in `MutableKdTree3D::add`.
+        let mut tree = MutableKdTree3D::with_capacity(Anisotropy3D::identity(), 1000);
+        // 200 points all sharing x=5.0 and y=10.0, varying z. 200 > 32.
+        for i in 0..200 {
+            tree.add(Coord3D::new(5.0, 10.0, i as Real));
+        }
+        assert_eq!(tree.size(), 200);
+        // The 5 nearest to (5, 10, 100) should be at z=98..102 in some
+        // order. Jitter is ulp-scale so ordering by z is preserved.
+        let nns = tree.nearest_n(Coord3D::new(5.0, 10.0, 100.0), 5);
+        assert_eq!(nns.len(), 5);
+        let mut z_values: Vec<f64> = nns
+            .iter()
+            .map(|n| n.distance) // distance == |z - 100| in this layout
+            .collect();
+        z_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Distances should be 0, 1, 1, 2, 2 (the centred point and
+        // the two pairs flanking it).
+        assert_relative_eq!(z_values[0], 0.0, epsilon = 1e-6);
+        assert_relative_eq!(z_values[1], 1.0, epsilon = 1e-6);
+        assert_relative_eq!(z_values[2], 1.0, epsilon = 1e-6);
+        assert_relative_eq!(z_values[3], 2.0, epsilon = 1e-6);
+        assert_relative_eq!(z_values[4], 2.0, epsilon = 1e-6);
     }
 
     #[test]
