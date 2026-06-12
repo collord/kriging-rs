@@ -189,6 +189,18 @@ unification that subsumes both is planned for v2.
   lag-centred binning. Bitwise pair-set parity with `gamv`.
 - Existing 2-D variogram model and fitting code (spherical,
   exponential, Gaussian, etc.) work unchanged on 3-D empirical output.
+- `fit_spherical_3d_joint` — pairs-weighted joint Nelder–Mead fit of
+  shared `(nugget, sill)` and per-axis ranges over the three
+  directional empirical variograms (major / minor / vertical).
+  Returns `Spherical3DJointFit { nugget, sill, range_major,
+  range_minor, range_vertical }`.
+- `fit_spherical_3d_two_stage` — vertical-anchored variant. Fits the
+  vertical direction first with sill clamped to the sample variance,
+  then fits the horizontals with `(nugget, sill)` inherited. More
+  robust when the horizontal small-lag bins are noisy.
+- `fit_spherical_3d_with_fixed_nugget` — refits `(sill, range_major,
+  range_minor, range_vertical)` with the nugget held at a
+  user-supplied value (e.g. from a measurement-error estimate).
 
 **WASM**:
 

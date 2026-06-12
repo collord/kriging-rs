@@ -11,14 +11,17 @@ pub mod fitting;
 pub mod models;
 pub mod nested;
 
+pub use directional_3d::{
+    DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d,
+};
 pub use empirical::{
     EmpiricalEstimator, EmpiricalVariogram, PositiveReal, VariogramConfig,
     compute_empirical_variogram, compute_empirical_variogram_binomial_calibrated,
 };
-pub use directional_3d::{
-    DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d,
-};
 pub use experimental_3d::compute_empirical_variogram_3d;
-pub use fitting::{FitResult, fit_variogram};
+pub use fitting::{
+    FitResult, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
+    fit_spherical_3d_with_fixed_nugget, fit_variogram,
+};
 pub use models::{VariogramModel, VariogramType};
 pub use nested::NestedVariogram;

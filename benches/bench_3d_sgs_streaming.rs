@@ -72,8 +72,7 @@ fn build_grid(n: usize) -> Grid3D {
 
 fn bench_sgs_one_realization(c: &mut Criterion) {
     let dataset = load_dataset();
-    let model =
-        SgsModel3D::new(dataset, Anisotropy3D::identity(), variogram()).unwrap();
+    let model = SgsModel3D::new(dataset, Anisotropy3D::identity(), variogram()).unwrap();
 
     let sizes = [10, 20, 30, 40, 50];
     let mut group = c.benchmark_group("sgs_3d_one_realization");
@@ -104,8 +103,7 @@ fn bench_sgs_one_realization(c: &mut Criterion) {
 /// Answers "how much speedup does rayon give us across realizations?"
 fn bench_sgs_serial_vs_parallel(c: &mut Criterion) {
     let dataset = load_dataset();
-    let model =
-        SgsModel3D::new(dataset, Anisotropy3D::identity(), variogram()).unwrap();
+    let model = SgsModel3D::new(dataset, Anisotropy3D::identity(), variogram()).unwrap();
     // 30^3 grid is the rough "interactive ceiling" we found in M11.
     let grid = build_grid(30);
 
@@ -114,19 +112,15 @@ fn bench_sgs_serial_vs_parallel(c: &mut Criterion) {
     group.sample_size(10);
 
     for n_real in realization_counts {
-        group.bench_with_input(
-            BenchmarkId::new("serial", n_real),
-            &n_real,
-            |b, &n_real| {
-                b.iter(|| {
-                    gaussian_simulation_3d_stream(&model, &grid, 1234, n_real, |_, gv| {
-                        std::hint::black_box(gv);
-                        Ok(())
-                    })
-                    .unwrap();
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("serial", n_real), &n_real, |b, &n_real| {
+            b.iter(|| {
+                gaussian_simulation_3d_stream(&model, &grid, 1234, n_real, |_, gv| {
+                    std::hint::black_box(gv);
+                    Ok(())
+                })
+                .unwrap();
+            });
+        });
         group.bench_with_input(
             BenchmarkId::new("parallel", n_real),
             &n_real,
@@ -151,7 +145,11 @@ fn bench_sgs_serial_vs_parallel(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_sgs_one_realization, bench_sgs_serial_vs_parallel);
+criterion_group!(
+    benches,
+    bench_sgs_one_realization,
+    bench_sgs_serial_vs_parallel
+);
 criterion_main!(benches);
 
 // Baseline numbers (M11, macOS x86_64 release, 150-sample dataset,

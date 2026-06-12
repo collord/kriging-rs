@@ -65,7 +65,10 @@ pub fn compute_empirical_variogram_3d(
     // is that a pair landing exactly on the outer boundary is dropped rather
     // than clamped into the last bin; for any non-degenerate dataset this
     // affects at most a handful of pairs.
-    let max_d = config.max_distance.map(|m| m.get()).unwrap_or(bin_width * n_bins as Real);
+    let max_d = config
+        .max_distance
+        .map(|m| m.get())
+        .unwrap_or(bin_width * n_bins as Real);
 
     // Parallelize over rows i. Each row produces its own per-bin
     // accumulator tuples, then a tree-reduction sums them. Sequential
@@ -111,11 +114,7 @@ pub fn compute_empirical_variogram_3d(
 /// Maximum anisotropic pair distance across all i<j. Native: rayon
 /// reduction. WASM: serial.
 #[cfg(not(target_arch = "wasm32"))]
-fn row_max_distance(
-    n: usize,
-    coords: &[Coord3D],
-    anisotropy: &Anisotropy3D,
-) -> Real {
+fn row_max_distance(n: usize, coords: &[Coord3D], anisotropy: &Anisotropy3D) -> Real {
     (0..n)
         .into_par_iter()
         .map(|i| {
@@ -132,11 +131,7 @@ fn row_max_distance(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn row_max_distance(
-    n: usize,
-    coords: &[Coord3D],
-    anisotropy: &Anisotropy3D,
-) -> Real {
+fn row_max_distance(n: usize, coords: &[Coord3D], anisotropy: &Anisotropy3D) -> Real {
     let mut max_observed: Real = 0.0;
     for i in 0..n {
         for j in (i + 1)..n {
@@ -264,12 +259,8 @@ mod tests {
             n_bins: NonZeroUsize::new(2).unwrap(),
             estimator: EmpiricalEstimator::Classical,
         };
-        let ev = compute_empirical_variogram_3d(
-            &dataset,
-            &Anisotropy3D::identity(),
-            &config,
-        )
-        .unwrap();
+        let ev =
+            compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config).unwrap();
         // Bin 0 covers [0, 1); bin 1 covers [1, 2]. Distances: (0,1) = 1.0
         // (lands in bin 1, since 1.0 / 1.0 = 1 = bin index), (0,2) = 1.0
         // (bin 1), (1,2) = sqrt(2) ≈ 1.414 (bin 1).
@@ -289,11 +280,7 @@ mod tests {
             n_bins: NonZeroUsize::new(2).unwrap(),
             estimator: EmpiricalEstimator::Classical,
         };
-        let result = compute_empirical_variogram_3d(
-            &dataset,
-            &Anisotropy3D::identity(),
-            &config,
-        );
+        let result = compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config);
         assert!(matches!(result, Err(KrigingError::FittingError(_))));
     }
 
@@ -325,21 +312,20 @@ mod tests {
             nalgebra::Vector3::new(1.0, 1.0, 10.0),
         )
         .unwrap();
-        let ev_aniso = compute_empirical_variogram_3d(
-            &dataset,
-            &stretched,
-            &config,
-        )
-        .unwrap();
+        let ev_aniso = compute_empirical_variogram_3d(&dataset, &stretched, &config).unwrap();
 
         // Mean distances must differ between iso and anisotropic.
         // (Detailed bin contents are sensitive to the bin-width arithmetic;
         // proving they're not equal is enough to show anisotropy is wired.)
-        let total_iso_distance: Real = ev_iso.distances.iter()
+        let total_iso_distance: Real = ev_iso
+            .distances
+            .iter()
             .zip(ev_iso.n_pairs.iter())
             .map(|(d, n)| d * (*n as Real))
             .sum();
-        let total_aniso_distance: Real = ev_aniso.distances.iter()
+        let total_aniso_distance: Real = ev_aniso
+            .distances
+            .iter()
             .zip(ev_aniso.n_pairs.iter())
             .map(|(d, n)| d * (*n as Real))
             .sum();
@@ -357,23 +343,16 @@ mod tests {
             n_bins: NonZeroUsize::new(2).unwrap(),
             estimator: EmpiricalEstimator::Classical,
         };
-        let ev_classical = compute_empirical_variogram_3d(
-            &dataset,
-            &Anisotropy3D::identity(),
-            &base_config,
-        )
-        .unwrap();
+        let ev_classical =
+            compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &base_config)
+                .unwrap();
 
         let ch_config = VariogramConfig {
             estimator: EmpiricalEstimator::CressieHawkins,
             ..base_config
         };
-        let ev_ch = compute_empirical_variogram_3d(
-            &dataset,
-            &Anisotropy3D::identity(),
-            &ch_config,
-        )
-        .unwrap();
+        let ev_ch = compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &ch_config)
+            .unwrap();
 
         // Same pair counts and bin distances, but semivariances differ.
         assert_eq!(ev_classical.n_pairs, ev_ch.n_pairs);
@@ -394,12 +373,8 @@ mod tests {
             n_bins: NonZeroUsize::new(2).unwrap(),
             estimator: EmpiricalEstimator::Classical,
         };
-        let ev = compute_empirical_variogram_3d(
-            &dataset,
-            &Anisotropy3D::identity(),
-            &config,
-        )
-        .unwrap();
+        let ev =
+            compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config).unwrap();
         // All pairs should land in some bin.
         let total: usize = ev.n_pairs.iter().sum();
         assert_eq!(total, 3);

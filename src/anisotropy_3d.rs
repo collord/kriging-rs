@@ -141,11 +141,7 @@ impl Anisotropy3D {
 
     /// Anisotropic distance between two world-frame points: `‖D · (a - b)‖`.
     pub fn anisotropic_distance(&self, a: Coord3D, b: Coord3D) -> f64 {
-        let lag = Vector3::new(
-            (a.x - b.x) as f64,
-            (a.y - b.y) as f64,
-            (a.z - b.z) as f64,
-        );
+        let lag = Vector3::new((a.x - b.x) as f64, (a.y - b.y) as f64, (a.z - b.z) as f64);
         (self.deformation_matrix() * lag).norm()
     }
 }
@@ -168,11 +164,9 @@ mod tests {
     fn axis_aligned_stretch_scales_components() {
         // No rotation; stretch (1, 2, 4). Lag along y should be doubled,
         // along z should be quadrupled.
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 2.0, 4.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 2.0, 4.0))
+                .unwrap();
         let origin = Coord3D::new(0.0, 0.0, 0.0);
         assert_relative_eq!(
             aniso.anisotropic_distance(origin, Coord3D::new(0.0, 5.0, 0.0)),
@@ -188,11 +182,7 @@ mod tests {
 
     #[test]
     fn from_rotation_matrix_rejects_non_orthogonal() {
-        let bad = Matrix3::new(
-            1.0, 0.5, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        );
+        let bad = Matrix3::new(1.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
         let result = Anisotropy3D::from_rotation_matrix(bad, Vector3::new(1.0, 1.0, 1.0));
         assert!(matches!(result, Err(KrigingError::InvalidInput(_))));
     }
@@ -200,27 +190,18 @@ mod tests {
     #[test]
     fn from_rotation_matrix_rejects_reflection() {
         // Determinant -1 (a reflection, not a rotation).
-        let reflect = Matrix3::new(
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, -1.0,
-        );
-        let result =
-            Anisotropy3D::from_rotation_matrix(reflect, Vector3::new(1.0, 1.0, 1.0));
+        let reflect = Matrix3::new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0);
+        let result = Anisotropy3D::from_rotation_matrix(reflect, Vector3::new(1.0, 1.0, 1.0));
         assert!(matches!(result, Err(KrigingError::InvalidInput(_))));
     }
 
     #[test]
     fn from_rotation_matrix_rejects_nonpositive_stretch() {
-        let result = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 0.0, 1.0),
-        );
+        let result =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 0.0, 1.0));
         assert!(matches!(result, Err(KrigingError::InvalidInput(_))));
-        let result = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, -1.0, 1.0),
-        );
+        let result =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, -1.0, 1.0));
         assert!(matches!(result, Err(KrigingError::InvalidInput(_))));
     }
 
@@ -230,39 +211,21 @@ mod tests {
         // distance should be unaffected by rotation.
         let cos = 0.0;
         let sin = 1.0;
-        let rot_z = Matrix3::new(
-            cos, -sin, 0.0,
-            sin,  cos, 0.0,
-            0.0,  0.0, 1.0,
-        );
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            rot_z,
-            Vector3::new(1.0, 1.0, 1.0),
-        )
-        .unwrap();
+        let rot_z = Matrix3::new(cos, -sin, 0.0, sin, cos, 0.0, 0.0, 0.0, 1.0);
+        let aniso = Anisotropy3D::from_rotation_matrix(rot_z, Vector3::new(1.0, 1.0, 1.0)).unwrap();
         let origin = Coord3D::new(0.0, 0.0, 0.0);
         let p = Coord3D::new(3.0, 4.0, 0.0);
-        assert_relative_eq!(
-            aniso.anisotropic_distance(origin, p),
-            5.0,
-            epsilon = 1e-9
-        );
+        assert_relative_eq!(aniso.anisotropic_distance(origin, p), 5.0, epsilon = 1e-9);
     }
 
     #[test]
     fn deformation_matrix_combines_rotation_and_stretch() {
         // Identity rotation + stretch (1, 2, 4) = diag(1, 2, 4).
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 2.0, 4.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 2.0, 4.0))
+                .unwrap();
         let d = aniso.deformation_matrix();
-        let expected = Matrix3::new(
-            1.0, 0.0, 0.0,
-            0.0, 2.0, 0.0,
-            0.0, 0.0, 4.0,
-        );
+        let expected = Matrix3::new(1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 4.0);
         assert_relative_eq!(d, expected, epsilon = 1e-12);
     }
 }

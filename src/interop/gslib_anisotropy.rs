@@ -52,6 +52,7 @@ use crate::error::KrigingError;
 
 /// GSLib's truncated `DEG2RAD` constant, computed in f32 and promoted to
 /// f64 to bitwise-match GSLib's `setrot`/`dsetrot`. See module docs.
+#[allow(clippy::approx_constant, clippy::excessive_precision)]
 const GSLIB_DEG2RAD: f64 = (3.141_592_654_f32 / 180.0_f32) as f64;
 
 /// GSLib's anisotropy parameters in the order setrot.f expects.
@@ -135,7 +136,9 @@ pub fn from_gslib(p: GslibAnisotropy) -> Result<Anisotropy3D, KrigingError> {
     );
 
     // Construct directly to bypass the strict orthogonality check.
-    Ok(Anisotropy3D::from_rotation_matrix_unchecked(rotation, stretch))
+    Ok(Anisotropy3D::from_rotation_matrix_unchecked(
+        rotation, stretch,
+    ))
 }
 
 /// Convert an [`Anisotropy3D`] back into GSLib parameters. Round-trips
@@ -224,7 +227,10 @@ mod tests {
             anis1: 0.0,
             anis2: 1.0,
         };
-        assert!(matches!(from_gslib(bad), Err(KrigingError::InvalidInput(_))));
+        assert!(matches!(
+            from_gslib(bad),
+            Err(KrigingError::InvalidInput(_))
+        ));
     }
 
     #[test]
@@ -236,6 +242,9 @@ mod tests {
             anis1: 1.0,
             anis2: 1.0,
         };
-        assert!(matches!(from_gslib(bad), Err(KrigingError::InvalidInput(_))));
+        assert!(matches!(
+            from_gslib(bad),
+            Err(KrigingError::InvalidInput(_))
+        ));
     }
 }

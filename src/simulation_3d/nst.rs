@@ -53,8 +53,7 @@ impl NormalScoreTransform {
         assert!(n > 0, "NormalScoreTransform: need at least one value");
 
         // Sort values with original indices preserved.
-        let mut indexed: Vec<(Real, usize)> =
-            values.iter().copied().zip(0..n).collect();
+        let mut indexed: Vec<(Real, usize)> = values.iter().copied().zip(0..n).collect();
         indexed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Compute average rank per tied group, then convert to scores.
@@ -172,7 +171,11 @@ mod tests {
     fn inv_standard_normal_cdf_known_quantiles() {
         // Φ⁻¹(0.5) = 0; Φ⁻¹(0.975) ≈ 1.95996.
         assert_relative_eq!(inv_standard_normal_cdf(0.5), 0.0, epsilon = 1e-9);
-        assert_relative_eq!(inv_standard_normal_cdf(0.975), 1.959963984540054, epsilon = 1e-6);
+        assert_relative_eq!(
+            inv_standard_normal_cdf(0.975),
+            1.959963984540054,
+            epsilon = 1e-6
+        );
         // Symmetry: Φ⁻¹(0.025) = -Φ⁻¹(0.975).
         assert_relative_eq!(
             inv_standard_normal_cdf(0.025),
@@ -206,7 +209,10 @@ mod tests {
                     assert!(
                         scores[i] < scores[j],
                         "rank-order violated: values[{i}]={}, values[{j}]={}, scores[{i}]={}, scores[{j}]={}",
-                        values[i], values[j], scores[i], scores[j],
+                        values[i],
+                        values[j],
+                        scores[i],
+                        scores[j],
                     );
                 }
             }

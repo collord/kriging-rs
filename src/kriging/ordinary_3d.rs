@@ -205,19 +205,13 @@ impl OrdinaryKrigingModel3D {
     /// thread-safe). WASM builds run sequentially (rayon's thread-pool
     /// model doesn't apply to single-threaded wasm32-unknown-unknown).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.par_iter().map(|t| self.predict(*t)).collect()
     }
 
     /// WASM (single-threaded) fallback for [`Self::predict_batch`].
     #[cfg(target_arch = "wasm32")]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.iter().map(|t| self.predict(*t)).collect()
     }
 
@@ -318,17 +312,13 @@ mod tests {
             vec![1.0, 1.5, 3.0],
         )
         .unwrap();
-        let model = OrdinaryKrigingModel3D::new(
-            dataset,
-            Anisotropy3D::identity(),
-            exp_variogram(),
-        )
-        .unwrap()
-        .with_solver_config(SolverConfig {
-            condition_threshold: 2.0,
-            max_retries: 0,
-            ..SolverConfig::default()
-        });
+        let model = OrdinaryKrigingModel3D::new(dataset, Anisotropy3D::identity(), exp_variogram())
+            .unwrap()
+            .with_solver_config(SolverConfig {
+                condition_threshold: 2.0,
+                max_retries: 0,
+                ..SolverConfig::default()
+            });
         let result = model.predict(Coord3D::new(5.0, 0.0, 0.0));
         assert!(
             result.is_err(),
@@ -348,19 +338,15 @@ mod tests {
         let dataset = PlanarDataset3D::new(samples, values).unwrap();
         let target = Coord3D::new(0.0, 0.0, 5.0);
 
-        let iso_model = OrdinaryKrigingModel3D::new(
-            dataset.clone(),
-            Anisotropy3D::identity(),
-            exp_variogram(),
-        )
-        .unwrap();
+        let iso_model =
+            OrdinaryKrigingModel3D::new(dataset.clone(), Anisotropy3D::identity(), exp_variogram())
+                .unwrap();
         let aniso = Anisotropy3D::from_rotation_matrix(
             nalgebra::Matrix3::identity(),
             nalgebra::Vector3::new(1.0, 1.0, 10.0),
         )
         .unwrap();
-        let aniso_model =
-            OrdinaryKrigingModel3D::new(dataset, aniso, exp_variogram()).unwrap();
+        let aniso_model = OrdinaryKrigingModel3D::new(dataset, aniso, exp_variogram()).unwrap();
 
         let p_iso = iso_model.predict(target).unwrap();
         let p_aniso = aniso_model.predict(target).unwrap();
@@ -382,6 +368,9 @@ mod tests {
         .unwrap();
         assert_eq!(model.coords().len(), 3);
         assert_eq!(model.values().len(), 3);
-        assert_eq!(model.variogram().variogram_type(), VariogramType::Exponential);
+        assert_eq!(
+            model.variogram().variogram_type(),
+            VariogramType::Exponential
+        );
     }
 }

@@ -13,9 +13,8 @@
 use std::time::Instant;
 
 use kriging_rs::{
-    Anisotropy3D, Coord3D, Grid3D, GslibAnisotropy, PlanarDataset3D, Real,
-    SgsModel3D, VariogramModel, VariogramType, from_gslib,
-    gaussian_simulation_3d_stream,
+    Anisotropy3D, Coord3D, Grid3D, GslibAnisotropy, PlanarDataset3D, Real, SgsModel3D,
+    VariogramModel, VariogramType, from_gslib, gaussian_simulation_3d_stream,
 };
 
 fn main() {
@@ -23,9 +22,7 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .or_else(|| std::env::var("OILSANDS_DAT").ok())
-        .expect(
-            "supply oilsands.dat path as the first arg or via OILSANDS_DAT env var",
-        );
+        .expect("supply oilsands.dat path as the first arg or via OILSANDS_DAT env var");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read oilsands.dat at {path}: {e}"));
     let mut lines = text.lines();
@@ -101,20 +98,34 @@ fn main() {
     let mut z_min: Real = Real::INFINITY;
     let mut z_max: Real = Real::NEG_INFINITY;
     for i in 0..xs.len() {
-        if xs[i] < x_min { x_min = xs[i] }
-        if xs[i] > x_max { x_max = xs[i] }
-        if ys[i] < y_min { y_min = ys[i] }
-        if ys[i] > y_max { y_max = ys[i] }
-        if zs[i] < z_min { z_min = zs[i] }
-        if zs[i] > z_max { z_max = zs[i] }
+        if xs[i] < x_min {
+            x_min = xs[i]
+        }
+        if xs[i] > x_max {
+            x_max = xs[i]
+        }
+        if ys[i] < y_min {
+            y_min = ys[i]
+        }
+        if ys[i] > y_max {
+            y_max = ys[i]
+        }
+        if zs[i] < z_min {
+            z_min = zs[i]
+        }
+        if zs[i] > z_max {
+            z_max = zs[i]
+        }
     }
     let dxdy: Real = 174.0 / 4.0;
     let dz: Real = 75.0 / 4.0;
     let nx = ((x_max - x_min) / dxdy).ceil().max(1.0) as usize;
     let ny = ((y_max - y_min) / dxdy).ceil().max(1.0) as usize;
     let nz = ((z_max - z_min) / dz).ceil().max(1.0) as usize;
-    println!("bbox: x [{:.0}..{:.0}], y [{:.0}..{:.0}], z [{:.0}..{:.0}]",
-             x_min, x_max, y_min, y_max, z_min, z_max);
+    println!(
+        "bbox: x [{:.0}..{:.0}], y [{:.0}..{:.0}], z [{:.0}..{:.0}]",
+        x_min, x_max, y_min, y_max, z_min, z_max
+    );
     println!("grid: {}x{}x{} = {} cells", nx, ny, nz, nx * ny * nz);
 
     let grid = Grid3D::new(

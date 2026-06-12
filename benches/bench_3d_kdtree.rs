@@ -30,8 +30,8 @@
 use std::num::NonZeroUsize;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use kriging_rs::{Anisotropy3D, Coord3D};
 use kriging_rs::neighborhood::kdtree_3d::KdTree3D;
+use kriging_rs::{Anisotropy3D, Coord3D};
 use nalgebra::{Matrix3, Vector3};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
@@ -71,16 +71,12 @@ fn bench_build(c: &mut Criterion) {
     let mut group = c.benchmark_group("kdtree_3d_build");
     for (name, stretch) in cases {
         let aniso = make_anisotropy(stretch);
-        group.bench_with_input(
-            BenchmarkId::from_parameter(name),
-            &aniso,
-            |b, aniso| {
-                b.iter(|| {
-                    let tree = KdTree3D::build(&points, *aniso);
-                    std::hint::black_box(tree);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(name), &aniso, |b, aniso| {
+            b.iter(|| {
+                let tree = KdTree3D::build(&points, *aniso);
+                std::hint::black_box(tree);
+            });
+        });
     }
     group.finish();
 }
@@ -88,9 +84,7 @@ fn bench_build(c: &mut Criterion) {
 fn bench_nearest_n(c: &mut Criterion) {
     let points = generate_points(N_POINTS, SEED);
     // Pre-generate query points so query cost dominates RNG cost.
-    let queries: Vec<Coord3D> = generate_points(100, SEED ^ 0x1234)
-        .into_iter()
-        .collect();
+    let queries: Vec<Coord3D> = generate_points(100, SEED ^ 0x1234).into_iter().collect();
     let cases = [
         ("isotropic", [1.0, 1.0, 1.0]),
         ("mild_2x", [1.0, 2.0, 1.0]),
@@ -102,20 +96,16 @@ fn bench_nearest_n(c: &mut Criterion) {
     for (name, stretch) in cases {
         let aniso = make_anisotropy(stretch);
         let tree = KdTree3D::build(&points, aniso);
-        group.bench_with_input(
-            BenchmarkId::from_parameter(name),
-            &tree,
-            |b, tree| {
-                b.iter(|| {
-                    let mut total = 0.0;
-                    for q in &queries {
-                        let nns = tree.nearest_n(*q, n);
-                        total += nns[0].distance;
-                    }
-                    std::hint::black_box(total);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(name), &tree, |b, tree| {
+            b.iter(|| {
+                let mut total = 0.0;
+                for q in &queries {
+                    let nns = tree.nearest_n(*q, n);
+                    total += nns[0].distance;
+                }
+                std::hint::black_box(total);
+            });
+        });
     }
     group.finish();
 }

@@ -249,16 +249,8 @@ where
     let mut rng = Rng::new(seed);
 
     for r in 0..n_realizations {
-        run_one_realization(
-            model,
-            grid,
-            &config,
-            &mut rng,
-            &mut path,
-            &mut grid_scores,
-        );
-        let output_slice =
-            finalize_output(output_space, model, &grid_scores, &mut grid_values);
+        run_one_realization(model, grid, &config, &mut rng, &mut path, &mut grid_scores);
+        let output_slice = finalize_output(output_space, model, &grid_scores, &mut grid_values);
         on_realization(r, output_slice)?;
     }
 
@@ -315,21 +307,9 @@ where
                 let config = SgsConfig::default();
                 let mut path: Vec<usize> = Vec::with_capacity(n_cells);
                 let mut grid_scores = vec![Real::NAN; n_cells];
-                run_one_realization(
-                    model,
-                    grid,
-                    &config,
-                    &mut rng,
-                    &mut path,
-                    &mut grid_scores,
-                );
+                run_one_realization(model, grid, &config, &mut rng, &mut path, &mut grid_scores);
                 let mut grid_values = vec![Real::NAN; n_cells];
-                let _ = finalize_output(
-                    output_space,
-                    model,
-                    &grid_scores,
-                    &mut grid_values,
-                );
+                let _ = finalize_output(output_space, model, &grid_scores, &mut grid_values);
                 match output_space {
                     SgsOutputSpace::DataSpace => grid_values,
                     SgsOutputSpace::ScoreSpace => grid_scores,
@@ -421,11 +401,7 @@ fn run_one_realization(
     let mut tree = MutableKdTree3D::with_capacity(model.anisotropy, n_samples + n_cells);
     let mut cond_coords: Vec<Coord3D> = Vec::with_capacity(n_samples + n_cells);
     let mut cond_scores: Vec<Real> = Vec::with_capacity(n_samples + n_cells);
-    for (c, s) in model
-        .sample_coords
-        .iter()
-        .zip(model.sample_scores.iter())
-    {
+    for (c, s) in model.sample_coords.iter().zip(model.sample_scores.iter()) {
         tree.add(*c);
         cond_coords.push(*c);
         cond_scores.push(*s);
@@ -547,8 +523,7 @@ mod tests {
     #[test]
     fn produces_finite_grid_for_small_problem() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let mut grids = Vec::new();
         gaussian_simulation_3d_stream(&model, &grid, 42, 1, |idx, gv| {
@@ -572,8 +547,7 @@ mod tests {
         // The determinism gate: identical seed and identical inputs ->
         // identical realization, byte-for-byte.
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let mut first: Vec<Real> = Vec::new();
         gaussian_simulation_3d_stream(&model, &grid, 12345, 1, |_, gv| {
@@ -589,19 +563,14 @@ mod tests {
         .unwrap();
         assert_eq!(first.len(), second.len());
         for (i, (a, b)) in first.iter().zip(second.iter()).enumerate() {
-            assert_eq!(
-                a.to_bits(),
-                b.to_bits(),
-                "cell {i} differs: {a} vs {b}",
-            );
+            assert_eq!(a.to_bits(), b.to_bits(), "cell {i} differs: {a} vs {b}",);
         }
     }
 
     #[test]
     fn different_seed_produces_different_realization() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let mut a: Vec<Real> = Vec::new();
         gaussian_simulation_3d_stream(&model, &grid, 1, 1, |_, gv| {
@@ -623,8 +592,7 @@ mod tests {
     #[test]
     fn closure_abort_propagates_as_error() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let result = gaussian_simulation_3d_stream(&model, &grid, 42, 3, |idx, _| {
             if idx == 1 {
@@ -639,8 +607,7 @@ mod tests {
     #[test]
     fn zero_realizations_errors() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let result = gaussian_simulation_3d_stream(&model, &grid, 42, 0, |_, _| Ok(()));
         assert!(matches!(result, Err(SgsError::InvalidInput(_))));
@@ -651,13 +618,14 @@ mod tests {
         // NST backward clamps to the empirical sample range; therefore
         // every simulated cell must be in [min_sample, max_sample].
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         gaussian_simulation_3d_stream(&model, &grid, 9999, 1, |_, gv| {
             for v in gv {
-                assert!(*v >= 1.0 - 1e-6 && *v <= 9.0 + 1e-6,
-                    "value {v} outside sample range [1, 9]");
+                assert!(
+                    *v >= 1.0 - 1e-6 && *v <= 9.0 + 1e-6,
+                    "value {v} outside sample range [1, 9]"
+                );
             }
             Ok(())
         })
@@ -670,8 +638,7 @@ mod tests {
     #[test]
     fn parallel_same_seed_per_realization_is_bit_identical() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
 
         let mut first: Vec<Vec<Real>> = Vec::new();
@@ -719,8 +686,7 @@ mod tests {
     #[test]
     fn parallel_callback_fires_in_realization_index_order() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
 
         let mut indices: Vec<usize> = Vec::new();
@@ -746,8 +712,7 @@ mod tests {
         // realization must produce a *different* grid (no collision
         // in the per-realization seed derivation).
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
 
         let mut grids: Vec<Vec<Real>> = Vec::new();
@@ -774,8 +739,7 @@ mod tests {
     #[test]
     fn parallel_callback_abort_propagates() {
         let model =
-            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram())
-                .unwrap();
+            SgsModel3D::new(small_dataset(), Anisotropy3D::identity(), variogram()).unwrap();
         let grid = small_grid();
         let result = gaussian_simulation_3d_stream_parallel(
             &model,

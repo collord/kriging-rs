@@ -94,10 +94,7 @@ mod tests {
             vec![Coord3D::new(0.0, 0.0, 0.0), Coord3D::new(1.0, 0.0, 0.0)],
             vec![1.0],
         );
-        assert!(matches!(
-            result,
-            Err(KrigingError::DimensionMismatch(_))
-        ));
+        assert!(matches!(result, Err(KrigingError::DimensionMismatch(_))));
     }
 
     #[test]
@@ -108,10 +105,7 @@ mod tests {
 
     #[test]
     fn rejects_single_point() {
-        let result = PlanarDataset3D::new(
-            vec![Coord3D::new(0.0, 0.0, 0.0)],
-            vec![1.0],
-        );
+        let result = PlanarDataset3D::new(vec![Coord3D::new(0.0, 0.0, 0.0)], vec![1.0]);
         assert!(matches!(result, Err(KrigingError::InsufficientData(2))));
     }
 

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 3-D fork (`3d-fork-v1` branch)
+
+- **3-D core types**: `Coord3D`, `Orientation`, `PlanarDataset3D`,
+  `Anisotropy3D` (rotation + diagonal stretch), `Grid3D`. GSLib I/O via
+  `from_gslib` / `to_gslib`; all GSLib conventions (clockwise-from-north
+  azimuth, dip-positive-down, truncated-π DEG2RAD) isolated in
+  `interop::gslib_anisotropy` with `setrot.f` parity to 1e-6.
+- **3-D variograms**: `compute_empirical_variogram_3d` (omnidirectional,
+  parallelized) and `compute_directional_variogram_3d` with
+  `DirectionFilter3D` (GSLib `gamv`-compatible cone + bandwidth filter,
+  lag-centred binning, bitwise pair-set parity with `gamv`).
+- **3-D variogram fitting**: `fit_spherical_3d_joint` (pairs-weighted
+  Nelder–Mead over shared `(nugget, sill)` and per-axis ranges),
+  `fit_spherical_3d_two_stage` (vertical-anchored, sill clamped at
+  sample variance), `fit_spherical_3d_with_fixed_nugget` (refits sill
+  and ranges with nugget held). Returns `Spherical3DJointFit`.
+- **3-D kriging**: `OrdinaryKrigingModel3D`, `SimpleKrigingModel3D`,
+  `UniversalKrigingModel3D` (linear trend basis `[1, x, y, z]`),
+  sharing a robust solver (`solve_*_3d`) with automatic nugget
+  inflation, condition-number reporting, and an optional
+  `Neighborhood3D` filter.
+- **3-D SGS**: `gaussian_simulation_3d_stream`,
+  `gaussian_simulation_3d_stream_parallel`,
+  `gaussian_simulation_3d_stream_with`. Streaming realization API;
+  engine retains nothing between calls. `SgsOutputSpace::ScoreSpace`
+  skips NST back-transform. `NormalScoreTransform` provides empirical-
+  CDF NST for pre/post-processing.
+- **3-D cross-validation**: `cv_3d::leave_one_out_ordinary_3d` /
+  `_simple_3d` / `_universal_3d_linear`, reusing upstream
+  `CvResidual` / `CvSummary`.
+- **Anisotropy-aware kd-trees**: `KdTree3D` and `MutableKdTree3D` over
+  `kiddo`, with coordinates pre-transformed into the anisotropy
+  ellipsoid's principal frame. `MutableKdTree3D::add` applies a
+  deterministic per-id ulp-scale jitter to avoid kiddo bucket-overflow
+  on dense colinear inputs.
+- **Rayon parallelism** on hot 3-D paths (empirical variogram,
+  directional variogram, SGS across realizations).
+- **WASM bindings**: `WasmOrdinaryKriging3D`, `WasmSimpleKriging3D`,
+  `WasmUniversalKriging3D`, `gaussianSimulation3D`,
+  `computeEmpiricalVariogram3D`, `computeDirectionalVariogram3D`,
+  `fitSpherical3D*`. Mirrors upstream's 2-D WASM API shape.
+- Native perf benchmark: `examples/sgs_oilsands_bench.rs`.
+
 ## [0.4.0] - 2026-04-26
 
 ### Added

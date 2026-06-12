@@ -77,10 +77,7 @@ impl SimpleKrigingModel3D {
     /// Attach a neighborhood filter. Builds an anisotropy-aware kd-tree
     /// over the samples at construction.
     pub fn with_neighborhood(mut self, neighborhood: Neighborhood3D) -> Self {
-        self.kdtree = Some(Arc::new(KdTree3D::build(
-            &self.coords,
-            self.anisotropy,
-        )));
+        self.kdtree = Some(Arc::new(KdTree3D::build(&self.coords, self.anisotropy)));
         self.neighborhood = Some(neighborhood);
         self
     }
@@ -120,18 +117,12 @@ impl SimpleKrigingModel3D {
     /// sequential. See [`super::ordinary_3d::OrdinaryKrigingModel3D::predict_batch`]
     /// for the parallelism rationale.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.par_iter().map(|t| self.predict(*t)).collect()
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.iter().map(|t| self.predict(*t)).collect()
     }
 
@@ -211,12 +202,8 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_mean() {
-        let result = SimpleKrigingModel3D::new(
-            dataset(),
-            Anisotropy3D::identity(),
-            variogram(),
-            Real::NAN,
-        );
+        let result =
+            SimpleKrigingModel3D::new(dataset(), Anisotropy3D::identity(), variogram(), Real::NAN);
         assert!(matches!(result, Err(KrigingError::InvalidInput(_))));
     }
 
@@ -225,10 +212,7 @@ mod tests {
         let model =
             SimpleKrigingModel3D::new(dataset(), Anisotropy3D::identity(), variogram(), 0.0)
                 .unwrap();
-        let targets = vec![
-            Coord3D::new(2.0, 2.0, 0.0),
-            Coord3D::new(5.0, 5.0, 1.0),
-        ];
+        let targets = vec![Coord3D::new(2.0, 2.0, 0.0), Coord3D::new(5.0, 5.0, 1.0)];
         let batch = model.predict_batch(&targets).unwrap();
         for (t, b) in targets.iter().zip(batch.iter()) {
             let single = model.predict(*t).unwrap();

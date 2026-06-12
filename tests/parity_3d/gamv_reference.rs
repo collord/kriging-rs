@@ -15,14 +15,12 @@
 use std::path::PathBuf;
 
 use kriging_rs::variogram::{
-    DirectionalConfig3D, EmpiricalEstimator, PositiveReal,
-    compute_directional_variogram_3d,
+    DirectionalConfig3D, EmpiricalEstimator, PositiveReal, compute_directional_variogram_3d,
 };
 use kriging_rs::{Coord3D, GslibDirection, PlanarDataset3D, Real};
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/parity_3d/fixtures/gamv_3d")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_3d/fixtures/gamv_3d")
 }
 
 /// Load samples from the `.gslib` free-format file. (We could also load
@@ -30,8 +28,7 @@ fn fixture_dir() -> PathBuf {
 /// data file is closer to the actual fixture provenance.)
 fn load_samples() -> PlanarDataset3D {
     let path = fixture_dir().join("samples.gslib");
-    let text = std::fs::read_to_string(&path)
-        .expect("samples.gslib should exist");
+    let text = std::fs::read_to_string(&path).expect("samples.gslib should exist");
     let mut lines = text.lines();
     // skip header: title + n_cols + n_cols column names
     let _title = lines.next().unwrap();
@@ -110,8 +107,8 @@ struct GamvRow {
 
 fn load_direction_output(name: &str) -> Vec<GamvRow> {
     let path = fixture_dir().join(format!("dir_{name}.csv"));
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("dir_{name}.csv should exist"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("dir_{name}.csv should exist"));
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
         if i == 0 {
@@ -148,10 +145,8 @@ fn gamv_directional_pair_counts_and_gamma_match() {
     // double-counts each pair and counts self-pairs in lag 1; the parity
     // test focuses on the three directional cases v3 §M6 requires. M5
     // already validates omnidirectional behavior against scikit-gstat.
-    let directional_cases: Vec<&GamvDirection> = directions
-        .iter()
-        .filter(|d| d.name != "omni")
-        .collect();
+    let directional_cases: Vec<&GamvDirection> =
+        directions.iter().filter(|d| d.name != "omni").collect();
     assert!(
         directional_cases.len() >= 3,
         "M6 needs at least three directional cases, got {}",

@@ -128,18 +128,14 @@ pub mod variogram;
 pub mod wasm;
 
 pub use anisotropy_3d::Anisotropy3D;
-pub use interop::gslib_anisotropy::{GslibAnisotropy, from_gslib, to_gslib};
-pub use interop::gslib_directional::GslibDirection;
-pub use variogram::{
-    DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d,
-};
 pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;
 pub use error::KrigingError;
 pub use geo_dataset::GeoDataset;
-pub use planar_dataset_3d::PlanarDataset3D;
 #[cfg(feature = "gpu")]
 pub use gpu::{GpuBackend, GpuSupport, build_rhs_covariances_gpu, detect_gpu_support, gpu_square};
+pub use interop::gslib_anisotropy::{GslibAnisotropy, from_gslib, to_gslib};
+pub use interop::gslib_directional::GslibDirection;
 pub use kriging::binomial::{
     BINOMIAL_CALIBRATION_VERSION, BinomialBuildNotes, BinomialCalibratedResult, BinomialFit,
     BinomialKrigingModel, BinomialObservation, BinomialPrediction, BinomialPrior,
@@ -149,28 +145,34 @@ pub use kriging::binomial::{
 pub use kriging::diagnostics::{Prediction3D, SolverFailure};
 pub use kriging::ordinary::{Neighborhood, OrdinaryKrigingModel, Prediction};
 pub use kriging::ordinary_3d::{Neighborhood3D, OrdinaryKrigingModel3D};
-pub use kriging::simple_3d::SimpleKrigingModel3D;
-pub use kriging::universal_3d::{Trend3D, UniversalKrigingModel3D};
-pub use simulation_3d::{
-    Grid3D, NormalScoreTransform, SgsConfig, SgsError, SgsModel3D, SgsOutputSpace,
-    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_parallel,
-    gaussian_simulation_3d_stream_with,
-};
 pub use kriging::simple::SimpleKrigingModel;
+pub use kriging::simple_3d::SimpleKrigingModel3D;
 pub use kriging::solver::{
     SolverConfig, solve_ordinary_kriging_3d, solve_simple_kriging_3d,
     solve_universal_kriging_3d_linear,
 };
 pub use kriging::universal::{UniversalKrigingModel, UniversalTrend};
+pub use kriging::universal_3d::{Trend3D, UniversalKrigingModel3D};
+pub use planar_dataset_3d::PlanarDataset3D;
 pub use projected::{
     Anisotropy2D, BinomialProjectedKrigingModel, DirectionalConfig, ProjectedBinomialFit,
     ProjectedBinomialObservation, ProjectedCoord, ProjectedDataset, ProjectedKrigingModel,
     compute_directional_empirical_variogram, euclidean_distance, euclidean_distance_squared,
 };
-pub use variogram::fitting::{FitResult, fit_variogram};
+pub use simulation_3d::{
+    Grid3D, NormalScoreTransform, SgsConfig, SgsError, SgsModel3D, SgsOutputSpace,
+    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_parallel,
+    gaussian_simulation_3d_stream_with,
+};
+pub use variogram::fitting::{
+    FitResult, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
+    fit_spherical_3d_with_fixed_nugget, fit_variogram,
+};
 pub use variogram::models::{VariogramModel, VariogramType};
 pub use variogram::nested::NestedVariogram;
+pub use variogram::{DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d};
 pub use variogram::{
-    EmpiricalEstimator, PositiveReal, VariogramConfig, compute_empirical_variogram,
-    compute_empirical_variogram_3d, compute_empirical_variogram_binomial_calibrated,
+    EmpiricalEstimator, EmpiricalVariogram, PositiveReal, VariogramConfig,
+    compute_empirical_variogram, compute_empirical_variogram_3d,
+    compute_empirical_variogram_binomial_calibrated,
 };

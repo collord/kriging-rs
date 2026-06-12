@@ -111,10 +111,7 @@ mod tests {
     #[test]
     fn pythagorean_3d() {
         // 3-4-12 -> 13 (3^2 + 4^2 + 12^2 = 9 + 16 + 144 = 169)
-        let d = euclidean_distance_3d(
-            Coord3D::new(0.0, 0.0, 0.0),
-            Coord3D::new(3.0, 4.0, 12.0),
-        );
+        let d = euclidean_distance_3d(Coord3D::new(0.0, 0.0, 0.0), Coord3D::new(3.0, 4.0, 12.0));
         assert_relative_eq!(d, 13.0);
     }
 

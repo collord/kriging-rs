@@ -14,8 +14,7 @@ use std::path::PathBuf;
 
 use kriging_rs::variogram::{
     DirectionalConfig3D, EmpiricalEstimator, FitResult, PositiveReal, VariogramConfig,
-    VariogramType, compute_directional_variogram_3d, compute_empirical_variogram_3d,
-    fit_variogram,
+    VariogramType, compute_directional_variogram_3d, compute_empirical_variogram_3d, fit_variogram,
 };
 use kriging_rs::{Anisotropy3D, Coord3D, GslibDirection, PlanarDataset3D, Real};
 
@@ -77,16 +76,15 @@ fn omnidirectional_pipeline_produces_fittable_model() {
         n_bins: NonZeroUsize::new(12).unwrap(),
         estimator: EmpiricalEstimator::Classical,
     };
-    let empirical = compute_empirical_variogram_3d(
-        &dataset,
-        &Anisotropy3D::identity(),
-        &config,
-    )
-    .expect("empirical variogram should compute");
-    assert!(!empirical.semivariances.is_empty(), "should have non-empty bins");
+    let empirical = compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config)
+        .expect("empirical variogram should compute");
+    assert!(
+        !empirical.semivariances.is_empty(),
+        "should have non-empty bins"
+    );
 
-    let fit = fit_variogram(&empirical, VariogramType::Exponential)
-        .expect("fitting should succeed");
+    let fit =
+        fit_variogram(&empirical, VariogramType::Exponential).expect("fitting should succeed");
     assert_model_sensible(&fit);
 }
 
@@ -108,8 +106,7 @@ fn omnidirectional_with_anisotropy_pipeline_runs() {
     let empirical = compute_empirical_variogram_3d(&dataset, &aniso, &config)
         .expect("anisotropic empirical variogram should compute");
 
-    let fit = fit_variogram(&empirical, VariogramType::Spherical)
-        .expect("fitting should succeed");
+    let fit = fit_variogram(&empirical, VariogramType::Spherical).expect("fitting should succeed");
     assert_model_sensible(&fit);
 }
 
@@ -155,12 +152,8 @@ fn multiple_model_types_fit_on_same_3d_empirical() {
         n_bins: NonZeroUsize::new(12).unwrap(),
         estimator: EmpiricalEstimator::Classical,
     };
-    let empirical = compute_empirical_variogram_3d(
-        &dataset,
-        &Anisotropy3D::identity(),
-        &config,
-    )
-    .unwrap();
+    let empirical =
+        compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config).unwrap();
 
     for model_type in [
         VariogramType::Spherical,

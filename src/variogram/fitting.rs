@@ -273,6 +273,7 @@ fn axis_residuals(empirical: &EmpiricalVariogram, nugget: Real, sill: Real, rang
         .sum()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn joint_residuals(
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
@@ -321,11 +322,7 @@ fn joint_params_ok(p: &[Real; 5]) -> bool {
         return false;
     }
     let (nugget, sill, r_major, r_minor, r_vertical) = (p[0], p[1], p[2], p[3], p[4]);
-    nugget >= 0.0
-        && sill > nugget
-        && r_major > 0.0
-        && r_minor > 0.0
-        && r_vertical > 0.0
+    nugget >= 0.0 && sill > nugget && r_major > 0.0 && r_minor > 0.0 && r_vertical > 0.0
 }
 
 /// Joint least-squares fit of a 3-D spherical variogram model to three
@@ -339,6 +336,7 @@ fn joint_params_ok(p: &[Real; 5]) -> bool {
 /// All three input variograms must be non-empty with matching-length
 /// arrays. Each is weighted by its own `n_pairs` so bins with more
 /// pairs contribute more to the loss.
+#[allow(clippy::needless_range_loop)]
 pub fn fit_spherical_3d_joint(
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
@@ -350,9 +348,7 @@ pub fn fit_spherical_3d_joint(
                 "{name} experimental variogram is empty"
             )));
         }
-        if ev.distances.len() != ev.semivariances.len()
-            || ev.distances.len() != ev.n_pairs.len()
-        {
+        if ev.distances.len() != ev.semivariances.len() || ev.distances.len() != ev.n_pairs.len() {
             return Err(KrigingError::FittingError(format!(
                 "{name} experimental variogram has mismatched array lengths"
             )));
@@ -412,11 +408,50 @@ pub fn fit_spherical_3d_joint(
     let step_r_vertical = (start[4] * 0.1).max(1e-6);
     let mut simplex: [([Real; 5], Real); 6] = [
         (start, start_val),
-        ([start[0] + step_nugget, start[1], start[2], start[3], start[4]], 0.0),
-        ([start[0], start[1] + step_sill, start[2], start[3], start[4]], 0.0),
-        ([start[0], start[1], start[2] + step_r_major, start[3], start[4]], 0.0),
-        ([start[0], start[1], start[2], start[3] + step_r_minor, start[4]], 0.0),
-        ([start[0], start[1], start[2], start[3], start[4] + step_r_vertical], 0.0),
+        (
+            [
+                start[0] + step_nugget,
+                start[1],
+                start[2],
+                start[3],
+                start[4],
+            ],
+            0.0,
+        ),
+        (
+            [start[0], start[1] + step_sill, start[2], start[3], start[4]],
+            0.0,
+        ),
+        (
+            [
+                start[0],
+                start[1],
+                start[2] + step_r_major,
+                start[3],
+                start[4],
+            ],
+            0.0,
+        ),
+        (
+            [
+                start[0],
+                start[1],
+                start[2],
+                start[3] + step_r_minor,
+                start[4],
+            ],
+            0.0,
+        ),
+        (
+            [
+                start[0],
+                start[1],
+                start[2],
+                start[3],
+                start[4] + step_r_vertical,
+            ],
+            0.0,
+        ),
     ];
     for entry in simplex.iter_mut().skip(1) {
         entry.1 = eval(entry.0);
@@ -575,9 +610,7 @@ pub fn fit_spherical_3d_two_stage(
                 "{name} experimental variogram is empty"
             )));
         }
-        if ev.distances.len() != ev.semivariances.len()
-            || ev.distances.len() != ev.n_pairs.len()
-        {
+        if ev.distances.len() != ev.semivariances.len() || ev.distances.len() != ev.n_pairs.len() {
             return Err(KrigingError::FittingError(format!(
                 "{name} experimental variogram has mismatched array lengths"
             )));
@@ -590,7 +623,11 @@ pub fn fit_spherical_3d_two_stage(
     // 3-D fit on the vertical -- which is the under-constrained
     // path that motivated this anchor in the first place.
     let (n0, _s0, r0_v) = initial_axis_guess(vertical);
-    let sill_anchor = if data_variance > 0.0 { data_variance } else { 0.0 };
+    let sill_anchor = if data_variance > 0.0 {
+        data_variance
+    } else {
+        0.0
+    };
 
     let (nugget_fit, sill_fit, range_vertical_fit) = if sill_anchor > 0.0 {
         // Anchored 2-D fit: nugget + range_vertical only.
@@ -604,14 +641,8 @@ pub fn fit_spherical_3d_two_stage(
             }
             axis_residuals(vertical, nugget, sill_anchor, range)
         };
-        let start: [Real; 2] = [
-            n0.max(0.0).min(sill_anchor * 0.5),
-            r0_v.max(Real::EPSILON),
-        ];
-        let steps = [
-            (sill_anchor * 0.05).max(1e-6),
-            (start[1] * 0.10).max(1e-6),
-        ];
+        let start: [Real; 2] = [n0.max(0.0).min(sill_anchor * 0.5), r0_v.max(Real::EPSILON)];
+        let steps = [(sill_anchor * 0.05).max(1e-6), (start[1] * 0.10).max(1e-6)];
         let best = nelder_mead_2d(start, steps, 128, &stage1_eval);
         if !best.1.is_finite() {
             return Err(KrigingError::FittingError(
@@ -709,9 +740,7 @@ pub fn fit_spherical_3d_with_fixed_nugget(
                 "{name} experimental variogram is empty"
             )));
         }
-        if ev.distances.len() != ev.semivariances.len()
-            || ev.distances.len() != ev.n_pairs.len()
-        {
+        if ev.distances.len() != ev.semivariances.len() || ev.distances.len() != ev.n_pairs.len() {
             return Err(KrigingError::FittingError(format!(
                 "{name} experimental variogram has mismatched array lengths"
             )));
@@ -734,8 +763,10 @@ pub fn fit_spherical_3d_with_fixed_nugget(
 
     let eval = |p: [Real; 4]| -> Real {
         let (sill, r_major, r_minor, r_vertical) = (p[0], p[1], p[2], p[3]);
-        if !sill.is_finite() || !r_major.is_finite()
-            || !r_minor.is_finite() || !r_vertical.is_finite()
+        if !sill.is_finite()
+            || !r_major.is_finite()
+            || !r_minor.is_finite()
+            || !r_vertical.is_finite()
         {
             return Real::INFINITY;
         }
@@ -781,6 +812,7 @@ pub fn fit_spherical_3d_with_fixed_nugget(
 // requires more allocation than these three explicit forms.
 // -----------------------------------------------------------------------------
 
+#[allow(clippy::needless_range_loop)]
 fn nelder_mead_2d(
     start: [Real; 2],
     steps: [Real; 2],
@@ -814,12 +846,22 @@ fn nelder_mead_2d(
             continue;
         }
         if r_val < best.1 {
-            let expand = [c[0] + 2.0 * (c[0] - worst.0[0]), c[1] + 2.0 * (c[1] - worst.0[1])];
+            let expand = [
+                c[0] + 2.0 * (c[0] - worst.0[0]),
+                c[1] + 2.0 * (c[1] - worst.0[1]),
+            ];
             let e_val = eval(expand);
-            simplex[2] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            simplex[2] = if e_val < r_val {
+                (expand, e_val)
+            } else {
+                (reflect, r_val)
+            };
             continue;
         }
-        let contract = [c[0] + 0.5 * (worst.0[0] - c[0]), c[1] + 0.5 * (worst.0[1] - c[1])];
+        let contract = [
+            c[0] + 0.5 * (worst.0[0] - c[0]),
+            c[1] + 0.5 * (worst.0[1] - c[1]),
+        ];
         let cn_val = eval(contract);
         if cn_val < worst.1 {
             simplex[2] = (contract, cn_val);
@@ -837,6 +879,7 @@ fn nelder_mead_2d(
     simplex[0]
 }
 
+#[allow(clippy::needless_range_loop)]
 fn nelder_mead_3d(
     start: [Real; 3],
     steps: [Real; 3],
@@ -885,7 +928,11 @@ fn nelder_mead_3d(
                 expand[j] = c[j] + 2.0 * (c[j] - worst.0[j]);
             }
             let e_val = eval(expand);
-            simplex[3] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            simplex[3] = if e_val < r_val {
+                (expand, e_val)
+            } else {
+                (reflect, r_val)
+            };
             continue;
         }
         let mut contract = [0.0 as Real; 3];
@@ -909,6 +956,7 @@ fn nelder_mead_3d(
     simplex[0]
 }
 
+#[allow(clippy::needless_range_loop)]
 fn nelder_mead_4d(
     start: [Real; 4],
     steps: [Real; 4],
@@ -957,7 +1005,11 @@ fn nelder_mead_4d(
                 expand[j] = c[j] + 2.0 * (c[j] - worst.0[j]);
             }
             let e_val = eval(expand);
-            simplex[4] = if e_val < r_val { (expand, e_val) } else { (reflect, r_val) };
+            simplex[4] = if e_val < r_val {
+                (expand, e_val)
+            } else {
+                (reflect, r_val)
+            };
             continue;
         }
         let mut contract = [0.0 as Real; 4];
@@ -1233,7 +1285,9 @@ mod tests {
         // Horizontals: two sparse noisy small-lag bins (close to γ = 0,
         // pair count 5 each) plus well-supported plateau bins.
         let mut horizontal = synth_spherical(
-            &(1..=8).map(|i| 100.0 + i as Real * 30.0).collect::<Vec<_>>(),
+            &(1..=8)
+                .map(|i| 100.0 + i as Real * 30.0)
+                .collect::<Vec<_>>(),
             nugget,
             sill,
             range,
@@ -1247,9 +1301,8 @@ mod tests {
         horizontal.semivariances.insert(0, 0.04);
         horizontal.n_pairs.insert(0, 5);
 
-        let two_stage = fit_spherical_3d_two_stage(
-            &horizontal, &horizontal, &vertical, sill,
-        ).unwrap();
+        let two_stage =
+            fit_spherical_3d_two_stage(&horizontal, &horizontal, &vertical, sill).unwrap();
         // Two-stage's nugget comes from vertical alone, so it should
         // land near the truth.
         approx::assert_relative_eq!(two_stage.nugget as f64, nugget as f64, epsilon = 5e-2);

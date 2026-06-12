@@ -22,9 +22,7 @@ use crate::Real;
 use crate::coord_3d::Coord3D;
 use crate::error::KrigingError;
 use crate::planar_dataset_3d::PlanarDataset3D;
-use crate::variogram::empirical::{
-    EmpiricalEstimator, EmpiricalVariogram, PositiveReal,
-};
+use crate::variogram::empirical::{EmpiricalEstimator, EmpiricalVariogram, PositiveReal};
 
 /// Internal direction filter — built from
 /// [`crate::interop::gslib_directional::GslibDirection`] at the API boundary,
@@ -160,15 +158,7 @@ pub fn compute_directional_variogram_3d(
     // to mainstream geostatistics practice. The parity test strips
     // gamv's lag-1 self bin before comparing.
     let (dist_sums, value_sums, counts) = accumulate_directional_pairs(
-        n,
-        coords,
-        values,
-        filter,
-        n_lags,
-        xlag,
-        xltol,
-        dismxs,
-        robust,
+        n, coords, values, filter, n_lags, xlag, xltol, dismxs, robust,
     );
 
     let mut distances = Vec::new();
@@ -237,9 +227,7 @@ fn directional_row_into(
 
         for k in 1..=n_lags {
             let centre = (k as f64 - 1.0) * xlag;
-            if h >= centre - xltol
-                && h <= centre + xltol
-                && filter.accepts(dx, dy, dz, h).is_some()
+            if h >= centre - xltol && h <= centre + xltol && filter.accepts(dx, dy, dz, h).is_some()
             {
                 let dz_val = (values[i] - values[j]).abs() as f64;
                 let g = if robust {
@@ -273,25 +261,19 @@ fn accumulate_directional_pairs(
     dismxs: f64,
     robust: bool,
 ) -> (Vec<f64>, Vec<f64>, Vec<usize>) {
-    let identity =
-        || (vec![0.0_f64; n_lags], vec![0.0_f64; n_lags], vec![0usize; n_lags]);
+    let identity = || {
+        (
+            vec![0.0_f64; n_lags],
+            vec![0.0_f64; n_lags],
+            vec![0usize; n_lags],
+        )
+    };
     (0..n)
         .into_par_iter()
         .fold(identity, |mut acc, i| {
             directional_row_into(
-                i,
-                n,
-                coords,
-                values,
-                filter,
-                n_lags,
-                xlag,
-                xltol,
-                dismxs,
-                robust,
-                &mut acc.0,
-                &mut acc.1,
-                &mut acc.2,
+                i, n, coords, values, filter, n_lags, xlag, xltol, dismxs, robust, &mut acc.0,
+                &mut acc.1, &mut acc.2,
             );
             acc
         })

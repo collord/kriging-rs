@@ -196,15 +196,14 @@ pub fn solve_ordinary_kriging_3d(
     let mut k_block = build_covariance_block(samples, anisotropy, variogram);
     let k0: DVector<f64> = DVector::from_iterator(
         n,
-        samples
-            .iter()
-            .map(|s| variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64),
+        samples.iter().map(|s| {
+            variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64
+        }),
     );
     let ones: DVector<f64> = DVector::from_element(n, 1.0);
     let sill_at_zero = variogram.covariance(0.0) as f64;
 
-    let (chol, cond_proxy, used_inflation) =
-        factor_with_retries(&mut k_block, config)?;
+    let (chol, cond_proxy, used_inflation) = factor_with_retries(&mut k_block, config)?;
 
     // Schur-complement solves: u = K^-1 e, v = K^-1 k0.
     let u = chol.solve(&ones);
@@ -270,14 +269,13 @@ pub fn solve_simple_kriging_3d(
     let mut k_block = build_covariance_block(samples, anisotropy, variogram);
     let k0: DVector<f64> = DVector::from_iterator(
         n,
-        samples
-            .iter()
-            .map(|s| variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64),
+        samples.iter().map(|s| {
+            variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64
+        }),
     );
     let sill_at_zero = variogram.covariance(0.0) as f64;
 
-    let (chol, cond_proxy, used_inflation) =
-        factor_with_retries(&mut k_block, config)?;
+    let (chol, cond_proxy, used_inflation) = factor_with_retries(&mut k_block, config)?;
 
     // SK has no Lagrangian: lambda = K^-1 k0 directly.
     let lambda = chol.solve(&k0);
@@ -363,9 +361,9 @@ pub fn solve_universal_kriging_3d_linear(
     let mut k_block = build_covariance_block(samples, anisotropy, variogram);
     let k0: DVector<f64> = DVector::from_iterator(
         n,
-        samples
-            .iter()
-            .map(|s| variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64),
+        samples.iter().map(|s| {
+            variogram.covariance(anisotropy.anisotropic_distance(*s, target) as Real) as f64
+        }),
     );
     let sill_at_zero = variogram.covariance(0.0) as f64;
 
@@ -380,8 +378,7 @@ pub fn solve_universal_kriging_3d_linear(
     let f0_arr = linear_trend_row(target);
     let f0 = Vector4::from(f0_arr);
 
-    let (chol, cond_proxy, used_inflation) =
-        factor_with_retries(&mut k_block, config)?;
+    let (chol, cond_proxy, used_inflation) = factor_with_retries(&mut k_block, config)?;
 
     // U = K^-1 F (column-by-column Cholesky solves).
     let mut u_mat = DMatrix::<f64>::zeros(n, UK_LINEAR_TREND_DIM);
@@ -456,10 +453,7 @@ mod tests {
     #[test]
     fn solves_well_conditioned_2x2_system_and_reports_low_condition() {
         // Two samples, well-separated, with the target between them.
-        let samples = vec![
-            Coord3D::new(0.0, 0.0, 0.0),
-            Coord3D::new(10.0, 0.0, 0.0),
-        ];
+        let samples = vec![Coord3D::new(0.0, 0.0, 0.0), Coord3D::new(10.0, 0.0, 0.0)];
         let values = vec![1.0 as Real, 3.0 as Real];
         let target = Coord3D::new(5.0, 0.0, 0.0);
         let pred = solve_ordinary_kriging_3d(
@@ -721,10 +715,7 @@ mod tests {
         // SK on a target between them should be approximately
         // m + (residual average). Just check it's between v1 and v2 and
         // shifted toward the mean.
-        let samples = vec![
-            Coord3D::new(0.0, 0.0, 0.0),
-            Coord3D::new(20.0, 0.0, 0.0),
-        ];
+        let samples = vec![Coord3D::new(0.0, 0.0, 0.0), Coord3D::new(20.0, 0.0, 0.0)];
         let values = vec![1.0 as Real, 3.0 as Real];
         let mean: Real = 10.0;
         let target = Coord3D::new(10.0, 0.0, 0.0);

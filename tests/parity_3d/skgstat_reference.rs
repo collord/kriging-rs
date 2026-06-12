@@ -24,8 +24,7 @@ use kriging_rs::variogram::{
 use kriging_rs::{Anisotropy3D, Coord3D, PlanarDataset3D, Real};
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/parity_3d/fixtures/skgstat_3d")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_3d/fixtures/skgstat_3d")
 }
 
 fn load_samples() -> PlanarDataset3D {
@@ -107,12 +106,8 @@ fn omnidirectional_variogram_matches_skgstat_reference() {
         estimator: EmpiricalEstimator::Classical, // Matheron
     };
 
-    let ev = compute_empirical_variogram_3d(
-        &dataset,
-        &Anisotropy3D::identity(),
-        &config,
-    )
-    .expect("omnidirectional variogram should compute");
+    let ev = compute_empirical_variogram_3d(&dataset, &Anisotropy3D::identity(), &config)
+        .expect("omnidirectional variogram should compute");
 
     // skgstat returns one entry per bin; my code skips empty bins. Filter
     // to the non-empty bins for a 1:1 comparison.

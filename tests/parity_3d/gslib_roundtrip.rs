@@ -51,9 +51,7 @@ fn load_fixtures() -> Vec<FixtureCase> {
             anis1: cols[3],
             anis2: cols[4],
             deformation: Matrix3::new(
-                cols[5], cols[6], cols[7],
-                cols[8], cols[9], cols[10],
-                cols[11], cols[12], cols[13],
+                cols[5], cols[6], cols[7], cols[8], cols[9], cols[10], cols[11], cols[12], cols[13],
             ),
         });
     }
@@ -80,8 +78,13 @@ fn from_gslib_matches_setrot_reference_table() {
             "case (ang1={}, ang2={}, ang3={}, anis1={}, anis2={}): \
              max(|ours - setrot|) = {max_err:e} exceeds 1e-7\n\
              ours:\n{}\nreference:\n{}",
-            case.ang1, case.ang2, case.ang3, case.anis1, case.anis2,
-            ours, case.deformation,
+            case.ang1,
+            case.ang2,
+            case.ang3,
+            case.anis1,
+            case.anis2,
+            ours,
+            case.deformation,
         );
     }
 }
@@ -105,19 +108,22 @@ fn gslib_round_trip_holds_angles_to_1e_minus_6_and_ratios_to_1e_minus_12() {
         assert!(
             ang1_diff < 1e-6,
             "ang1 round-trip drifted: input={}, recovered={}, diff={ang1_diff}",
-            input.ang1, recovered.ang1,
+            input.ang1,
+            recovered.ang1,
         );
         let ang2_diff = (recovered.ang2 - input.ang2).abs();
         let ang3_diff = (recovered.ang3 - input.ang3).abs();
         assert!(
             ang2_diff < 1e-6,
             "ang2 round-trip drifted: input={}, recovered={}, diff={ang2_diff}",
-            input.ang2, recovered.ang2,
+            input.ang2,
+            recovered.ang2,
         );
         assert!(
             ang3_diff < 1e-6,
             "ang3 round-trip drifted: input={}, recovered={}, diff={ang3_diff}",
-            input.ang3, recovered.ang3,
+            input.ang3,
+            recovered.ang3,
         );
         assert_relative_eq!(recovered.anis1, input.anis1, epsilon = 1e-12);
         assert_relative_eq!(recovered.anis2, input.anis2, epsilon = 1e-12);

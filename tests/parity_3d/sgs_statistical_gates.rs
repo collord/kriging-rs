@@ -22,14 +22,13 @@
 use std::path::PathBuf;
 
 use kriging_rs::{
-    Anisotropy3D, Coord3D, Grid3D, OrdinaryKrigingModel3D, PlanarDataset3D, Real,
-    SgsModel3D, SgsOutputSpace, VariogramModel, VariogramType,
-    gaussian_simulation_3d_stream, gaussian_simulation_3d_stream_with,
+    Anisotropy3D, Coord3D, Grid3D, OrdinaryKrigingModel3D, PlanarDataset3D, Real, SgsModel3D,
+    SgsOutputSpace, VariogramModel, VariogramType, gaussian_simulation_3d_stream,
+    gaussian_simulation_3d_stream_with,
 };
 
 fn samples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/parity_3d/fixtures/skgstat_3d")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_3d/fixtures/skgstat_3d")
 }
 
 fn load_dataset() -> PlanarDataset3D {
@@ -76,12 +75,8 @@ fn small_grid() -> Grid3D {
 #[test]
 fn same_target_determinism_bit_identical_realization() {
     let dataset = load_dataset();
-    let model = SgsModel3D::new(
-        dataset,
-        Anisotropy3D::identity(),
-        score_space_variogram(),
-    )
-    .unwrap();
+    let model =
+        SgsModel3D::new(dataset, Anisotropy3D::identity(), score_space_variogram()).unwrap();
     let grid = small_grid();
 
     let mut first: Vec<Real> = Vec::new();
@@ -98,11 +93,7 @@ fn same_target_determinism_bit_identical_realization() {
     .unwrap();
     assert_eq!(first.len(), second.len());
     for (i, (a, b)) in first.iter().zip(second.iter()).enumerate() {
-        assert_eq!(
-            a.to_bits(),
-            b.to_bits(),
-            "cell {i}: a={a} b={b}",
-        );
+        assert_eq!(a.to_bits(), b.to_bits(), "cell {i}: a={a} b={b}",);
     }
 }
 
@@ -120,12 +111,7 @@ fn realization_mean_converges_to_ok_prediction() {
     // tail-cell variability.
     let dataset = load_dataset();
     let variogram = score_space_variogram();
-    let model = SgsModel3D::new(
-        dataset.clone(),
-        Anisotropy3D::identity(),
-        variogram,
-    )
-    .unwrap();
+    let model = SgsModel3D::new(dataset.clone(), Anisotropy3D::identity(), variogram).unwrap();
     let grid = small_grid();
     let n_realizations = 100;
     let n_cells = grid.n_cells();
@@ -156,11 +142,7 @@ fn realization_mean_converges_to_ok_prediction() {
     // replaced with normal scores; the kriging math is identical.
     let scored_dataset = {
         let (coords, _) = dataset.into_parts();
-        let scores: Vec<Real> = model
-            .sample_scores()
-            .iter()
-            .copied()
-            .collect();
+        let scores: Vec<Real> = model.sample_scores().iter().copied().collect();
         PlanarDataset3D::new(coords, scores).unwrap()
     };
     let ok_model = OrdinaryKrigingModel3D::new(
@@ -200,12 +182,16 @@ fn realization_mean_converges_to_ok_prediction() {
     eprintln!(
         "score-space mean-converges-to-OK gate: {}/{} cells passed ({:.1}%); \
          max |mean - OK_score| = {:.4}",
-        passed, total, pass_rate * 100.0, max_abs_err,
+        passed,
+        total,
+        pass_rate * 100.0,
+        max_abs_err,
     );
     assert!(
         pass_rate >= 0.90,
         "expected >= 90% pass rate, got {:.1}% (max abs err: {:.4})",
-        pass_rate * 100.0, max_abs_err,
+        pass_rate * 100.0,
+        max_abs_err,
     );
 }
 
@@ -215,12 +201,8 @@ fn sgs_produces_no_nan_on_normal_workload() {
     // cell should be finite. Per v3 §"no silent solver failures": we
     // explicitly check that NaN doesn't sneak through.
     let dataset = load_dataset();
-    let model = SgsModel3D::new(
-        dataset,
-        Anisotropy3D::identity(),
-        score_space_variogram(),
-    )
-    .unwrap();
+    let model =
+        SgsModel3D::new(dataset, Anisotropy3D::identity(), score_space_variogram()).unwrap();
     let grid = small_grid();
 
     let mut n_nan = 0;

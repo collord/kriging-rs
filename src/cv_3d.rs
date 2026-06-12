@@ -132,8 +132,7 @@ pub fn leave_one_out_simple_3d(
     let per_fold = |i: usize| -> Result<CvResidual, KrigingError> {
         let (fold_coords, fold_values) = leave_one_out_training(coords, values, i);
         let dataset = PlanarDataset3D::new(fold_coords, fold_values)?;
-        let model =
-            SimpleKrigingModel3D::new(dataset, anisotropy, variogram, mean)?;
+        let model = SimpleKrigingModel3D::new(dataset, anisotropy, variogram, mean)?;
         let pred = model.predict(coords[i])?;
         Ok(CvResidual {
             index: i,
@@ -185,12 +184,7 @@ pub fn leave_one_out_universal_3d_linear(
     let per_fold = |i: usize| -> Result<CvResidual, KrigingError> {
         let (fold_coords, fold_values) = leave_one_out_training(coords, values, i);
         let dataset = PlanarDataset3D::new(fold_coords, fold_values)?;
-        let model = UniversalKrigingModel3D::new(
-            dataset,
-            anisotropy,
-            variogram,
-            Trend3D::Linear,
-        )?;
+        let model = UniversalKrigingModel3D::new(dataset, anisotropy, variogram, Trend3D::Linear)?;
         let pred = model.predict(coords[i])?;
         Ok(CvResidual {
             index: i,
@@ -239,14 +233,13 @@ mod tests {
         for i in 0..3 {
             for j in 0..5 {
                 for l in 0..2 {
-                    let c = Coord3D::new(
-                        (i as Real) * 30.0,
-                        (j as Real) * 20.0,
-                        (l as Real) * 25.0,
-                    );
+                    let c =
+                        Coord3D::new((i as Real) * 30.0, (j as Real) * 20.0, (l as Real) * 25.0);
                     coords.push(c);
                     // Cheap deterministic "noise" derived from a counter.
-                    k = k.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    k = k
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let n = ((k >> 32) as f64 / (1u64 << 32) as f64 - 0.5) as Real * 0.1;
                     values.push(smooth_field(c) + n);
                 }
@@ -283,13 +276,9 @@ mod tests {
     #[test]
     fn loocv_ordinary_3d_produces_one_residual_per_sample_in_order() {
         let (coords, values) = synthetic_3d_dataset();
-        let residuals = leave_one_out_ordinary_3d(
-            &coords,
-            &values,
-            Anisotropy3D::identity(),
-            variogram(),
-        )
-        .unwrap();
+        let residuals =
+            leave_one_out_ordinary_3d(&coords, &values, Anisotropy3D::identity(), variogram())
+                .unwrap();
         assert_eq!(residuals.len(), coords.len());
         for (i, r) in residuals.iter().enumerate() {
             assert_eq!(r.index, i, "residual {i} should reference sample {i}");
@@ -306,12 +295,7 @@ mod tests {
     fn loocv_ordinary_3d_rejects_dataset_under_3() {
         let coords = vec![Coord3D::new(0.0, 0.0, 0.0), Coord3D::new(10.0, 0.0, 0.0)];
         let values = vec![1.0 as Real, 2.0 as Real];
-        let r = leave_one_out_ordinary_3d(
-            &coords,
-            &values,
-            Anisotropy3D::identity(),
-            variogram(),
-        );
+        let r = leave_one_out_ordinary_3d(&coords, &values, Anisotropy3D::identity(), variogram());
         assert!(matches!(r, Err(KrigingError::InsufficientData(3))));
     }
 
@@ -321,13 +305,9 @@ mod tests {
         // from the in-sample prediction at the same location (which
         // would just be values[i] for low-nugget OK).
         let (coords, values) = synthetic_3d_dataset();
-        let residuals = leave_one_out_ordinary_3d(
-            &coords,
-            &values,
-            Anisotropy3D::identity(),
-            variogram(),
-        )
-        .unwrap();
+        let residuals =
+            leave_one_out_ordinary_3d(&coords, &values, Anisotropy3D::identity(), variogram())
+                .unwrap();
         let n_distinct = residuals
             .iter()
             .filter(|r| (r.predicted as f64 - r.observed as f64).abs() > 1e-6)
@@ -430,14 +410,12 @@ mod tests {
             .iter()
             .copied()
             .fold(0.0 as Real, |acc, v| acc.max(v))
-            - values
-                .iter()
-                .copied()
-                .fold(Real::MAX, |acc, v| acc.min(v));
+            - values.iter().copied().fold(Real::MAX, |acc, v| acc.min(v));
         assert!(
             (summary.rmse as f64) < (value_range as f64) * 0.5,
             "LOOCV RMSE {} too large relative to value range {}",
-            summary.rmse, value_range,
+            summary.rmse,
+            value_range,
         );
     }
 }

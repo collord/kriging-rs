@@ -97,7 +97,7 @@ impl KdTree3D {
     /// Number of points indexed by the tree.
     #[inline]
     pub fn size(&self) -> usize {
-        self.tree.size() as usize
+        self.tree.size()
     }
 
     fn transform_query(&self, query: Coord3D) -> [f64; 3] {
@@ -150,17 +150,6 @@ impl KdTree3D {
 // kiddo mutable kd-tree type alias.
 type MutableTree = KdTree<f64, u64, 3, 32, u32>;
 
-/// Anisotropy-aware **mutable** 3-D kd-tree.
-///
-/// Used by SGS to maintain a growing conditioning set during a single
-/// realization. The pre-transformation logic is identical to the
-/// immutable [`KdTree3D`]; the difference is `add` is supported and
-/// `build_with_capacity` allows pre-allocating enough space for the
-/// final size to avoid rehashing.
-///
-/// API mirrors [`KdTree3D`] but each query operates on the current
-/// (live) point set rather than a snapshot.
-
 /// Deterministic, per-id tiny perturbation on each axis. Magnitude
 /// ~1e-12 (relative; scaled by coordinate magnitude at the callsite),
 /// using a splitmix-style hash of `id` so different ids get different
@@ -183,6 +172,16 @@ fn jitter_for(id: u64) -> (f64, f64, f64) {
     (jx, jy, jz)
 }
 
+/// Anisotropy-aware **mutable** 3-D kd-tree.
+///
+/// Used by SGS to maintain a growing conditioning set during a single
+/// realization. The pre-transformation logic is identical to the
+/// immutable [`KdTree3D`]; the difference is `add` is supported and
+/// `build_with_capacity` allows pre-allocating enough space for the
+/// final size to avoid rehashing.
+///
+/// API mirrors [`KdTree3D`] but each query operates on the current
+/// (live) point set rather than a snapshot.
 #[derive(Debug)]
 pub struct MutableKdTree3D {
     tree: MutableTree,
@@ -462,11 +461,9 @@ mod tests {
         // The nearest point is therefore corner 0 (tied with 4); kiddo
         // returns a deterministic choice. We assert the *distance* is 5.0
         // not 0.5, which proves the stretch was applied.
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 1.0, 10.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 1.0, 10.0))
+                .unwrap();
         let pts = unit_cube_corners();
         let tree = KdTree3D::build(&pts, aniso);
         let nn = tree.nearest_one(Coord3D::new(0.0, 0.0, 0.5));
@@ -481,11 +478,9 @@ mod tests {
         // tree must equal Anisotropy3D::anisotropic_distance on the world-
         // frame coordinates. This is the foundational invariant of the
         // pre-transformed kd-tree.
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 2.0, 5.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 2.0, 5.0))
+                .unwrap();
         let pts = unit_cube_corners();
         let tree = KdTree3D::build(&pts, aniso);
         let query = Coord3D::new(0.3, 0.4, 0.5);
@@ -507,17 +502,10 @@ mod tests {
         // the same world-space points; distances must agree.
         let cos = 0.5_f64.sqrt();
         let sin = 0.5_f64.sqrt();
-        let rot_z_45 = Matrix3::new(
-            cos, -sin, 0.0,
-            sin,  cos, 0.0,
-            0.0,  0.0, 1.0,
-        );
+        let rot_z_45 = Matrix3::new(cos, -sin, 0.0, sin, cos, 0.0, 0.0, 0.0, 1.0);
         let iso = Anisotropy3D::identity();
-        let rotated = Anisotropy3D::from_rotation_matrix(
-            rot_z_45,
-            Vector3::new(1.0, 1.0, 1.0),
-        )
-        .unwrap();
+        let rotated =
+            Anisotropy3D::from_rotation_matrix(rot_z_45, Vector3::new(1.0, 1.0, 1.0)).unwrap();
         let pts = unit_cube_corners();
         let tree_iso = KdTree3D::build(&pts, iso);
         let tree_rot = KdTree3D::build(&pts, rotated);
@@ -541,11 +529,9 @@ mod tests {
         // distance corresponds to z extent of 0.2 -- so corners with z = 1
         // (anisotropic z = 10) are excluded; corners with z = 0 within
         // anisotropic radius 2 are included.
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 1.0, 10.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 1.0, 10.0))
+                .unwrap();
         let pts = unit_cube_corners();
         let tree = KdTree3D::build(&pts, aniso);
         let neighbours = tree.within(Coord3D::new(0.0, 0.0, 0.0), 2.0);
@@ -562,11 +548,9 @@ mod tests {
         // Functionally this should still find correct neighbours, even if
         // the tree's internal performance degrades (perf is checked in
         // benches, not here).
-        let aniso = Anisotropy3D::from_rotation_matrix(
-            Matrix3::identity(),
-            Vector3::new(1.0, 50.0, 1.0),
-        )
-        .unwrap();
+        let aniso =
+            Anisotropy3D::from_rotation_matrix(Matrix3::identity(), Vector3::new(1.0, 50.0, 1.0))
+                .unwrap();
         let pts = unit_cube_corners();
         let tree = KdTree3D::build(&pts, aniso);
         // Query near corner 1 = (1, 0, 0). With 50x y-stretch, points with

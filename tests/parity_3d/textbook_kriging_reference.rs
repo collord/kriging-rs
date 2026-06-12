@@ -28,13 +28,11 @@ use kriging_rs::{
 };
 
 fn samples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/parity_3d/fixtures/skgstat_3d")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_3d/fixtures/skgstat_3d")
 }
 
 fn fixture_dir(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("tests/parity_3d/fixtures/{name}"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/parity_3d/fixtures/{name}"))
 }
 
 fn load_samples() -> PlanarDataset3D {
@@ -109,8 +107,16 @@ fn check_parity<F>(
             .unwrap_or_else(|e| panic!("{label}: solver failed at target {i}: {e}"));
         let v_err = (p.value as f64 - exp.value).abs();
         let var_err = (p.variance as f64 - exp.variance).abs();
-        let v_rel = if exp.value.abs() > 1e-6 { v_err / exp.value.abs() } else { v_err };
-        let var_rel = if exp.variance.abs() > 1e-6 { var_err / exp.variance.abs() } else { var_err };
+        let v_rel = if exp.value.abs() > 1e-6 {
+            v_err / exp.value.abs()
+        } else {
+            v_err
+        };
+        let var_rel = if exp.variance.abs() > 1e-6 {
+            var_err / exp.variance.abs()
+        } else {
+            var_err
+        };
         max_value_rel_err = max_value_rel_err.max(v_rel);
         max_variance_rel_err = max_variance_rel_err.max(var_rel);
         if v_rel >= value_rel || var_rel >= variance_rel {
@@ -120,9 +126,15 @@ fn check_parity<F>(
                     "target {i} @ ({:.3}, {:.3}, {:.3}): \
                      ours value={:.6} ref={:.6} rel={:.2e}; \
                      ours variance={:.6} ref={:.6} rel={:.2e}",
-                    exp.target.x, exp.target.y, exp.target.z,
-                    p.value, exp.value, v_rel,
-                    p.variance, exp.variance, var_rel,
+                    exp.target.x,
+                    exp.target.y,
+                    exp.target.z,
+                    p.value,
+                    exp.value,
+                    v_rel,
+                    p.variance,
+                    exp.variance,
+                    var_rel,
                 ));
             }
         }
@@ -154,8 +166,12 @@ fn ordinary_kriging_3d_matches_textbook_at_1000_locations() {
         .expect("OK variogram.csv should exist");
     let mut lines = csv.lines();
     let _header = lines.next().unwrap();
-    let cols: Vec<f64> = lines.next().unwrap().split(',')
-        .map(|s| s.trim().parse::<f64>().unwrap()).collect();
+    let cols: Vec<f64> = lines
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|s| s.trim().parse::<f64>().unwrap())
+        .collect();
     let (effective_range, partial_sill, nugget) = (cols[0], cols[1], cols[2]);
     let variogram = VariogramModel::new(
         nugget as Real,
@@ -165,11 +181,9 @@ fn ordinary_kriging_3d_matches_textbook_at_1000_locations() {
     )
     .unwrap();
 
-    let model = OrdinaryKrigingModel3D::new(
-        dataset, Anisotropy3D::identity(), variogram,
-    )
-    .unwrap()
-    .with_neighborhood(Neighborhood3D::within_radius(effective_range));
+    let model = OrdinaryKrigingModel3D::new(dataset, Anisotropy3D::identity(), variogram)
+        .unwrap()
+        .with_neighborhood(Neighborhood3D::within_radius(effective_range));
 
     let expectations = load_predictions("textbook_ok3d");
     assert_eq!(expectations.len(), 1000);
@@ -183,10 +197,13 @@ fn simple_kriging_3d_matches_textbook_at_1000_locations() {
         .expect("SK variogram.csv should exist");
     let mut lines = csv.lines();
     let _header = lines.next().unwrap();
-    let cols: Vec<f64> = lines.next().unwrap().split(',')
-        .map(|s| s.trim().parse::<f64>().unwrap()).collect();
-    let (effective_range, partial_sill, nugget, mean) =
-        (cols[0], cols[1], cols[2], cols[3]);
+    let cols: Vec<f64> = lines
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|s| s.trim().parse::<f64>().unwrap())
+        .collect();
+    let (effective_range, partial_sill, nugget, mean) = (cols[0], cols[1], cols[2], cols[3]);
     let variogram = VariogramModel::new(
         nugget as Real,
         (partial_sill + nugget) as Real,
@@ -195,10 +212,9 @@ fn simple_kriging_3d_matches_textbook_at_1000_locations() {
     )
     .unwrap();
 
-    let model = SimpleKrigingModel3D::new(
-        dataset, Anisotropy3D::identity(), variogram, mean as Real,
-    )
-    .unwrap();
+    let model =
+        SimpleKrigingModel3D::new(dataset, Anisotropy3D::identity(), variogram, mean as Real)
+            .unwrap();
 
     let expectations = load_predictions("textbook_sk3d");
     assert_eq!(expectations.len(), 1000);
@@ -214,8 +230,12 @@ fn universal_kriging_3d_linear_matches_textbook_at_1000_locations() {
         .expect("UK variogram.csv should exist");
     let mut lines = csv.lines();
     let _header = lines.next().unwrap();
-    let cols: Vec<f64> = lines.next().unwrap().split(',')
-        .map(|s| s.trim().parse::<f64>().unwrap()).collect();
+    let cols: Vec<f64> = lines
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|s| s.trim().parse::<f64>().unwrap())
+        .collect();
     let (effective_range, partial_sill, nugget) = (cols[0], cols[1], cols[2]);
     let variogram = VariogramModel::new(
         nugget as Real,
@@ -226,7 +246,10 @@ fn universal_kriging_3d_linear_matches_textbook_at_1000_locations() {
     .unwrap();
 
     let model = UniversalKrigingModel3D::new(
-        dataset, Anisotropy3D::identity(), variogram, Trend3D::Linear,
+        dataset,
+        Anisotropy3D::identity(),
+        variogram,
+        Trend3D::Linear,
     )
     .unwrap();
 

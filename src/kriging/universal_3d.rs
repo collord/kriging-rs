@@ -91,10 +91,7 @@ impl UniversalKrigingModel3D {
     /// trend basis (4 samples in general position for linear); the
     /// solver returns `NonFiniteWeights` if it doesn't.
     pub fn with_neighborhood(mut self, neighborhood: Neighborhood3D) -> Self {
-        self.kdtree = Some(Arc::new(KdTree3D::build(
-            &self.coords,
-            self.anisotropy,
-        )));
+        self.kdtree = Some(Arc::new(KdTree3D::build(&self.coords, self.anisotropy)));
         self.neighborhood = Some(neighborhood);
         self
     }
@@ -134,18 +131,12 @@ impl UniversalKrigingModel3D {
     /// Predict a batch of targets. Native: parallel via rayon. WASM:
     /// sequential. See [`super::ordinary_3d::OrdinaryKrigingModel3D::predict_batch`].
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.par_iter().map(|t| self.predict(*t)).collect()
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn predict_batch(
-        &self,
-        targets: &[Coord3D],
-    ) -> Result<Vec<Prediction3D>, KrigingError> {
+    pub fn predict_batch(&self, targets: &[Coord3D]) -> Result<Vec<Prediction3D>, KrigingError> {
         targets.iter().map(|t| self.predict(*t)).collect()
     }
 
@@ -257,10 +248,7 @@ mod tests {
             Trend3D::Linear,
         )
         .unwrap();
-        let targets = vec![
-            Coord3D::new(2.0, 2.0, 2.0),
-            Coord3D::new(7.0, 3.0, 1.0),
-        ];
+        let targets = vec![Coord3D::new(2.0, 2.0, 2.0), Coord3D::new(7.0, 3.0, 1.0)];
         let batch = model.predict_batch(&targets).unwrap();
         for (t, b) in targets.iter().zip(batch.iter()) {
             let single = model.predict(*t).unwrap();

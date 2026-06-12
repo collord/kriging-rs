@@ -20,10 +20,12 @@ use js_sys::{Float64Array, Function, Object, Reflect};
 use std::num::NonZeroUsize;
 use wasm_bindgen::prelude::*;
 
+use super::{coded_err, kriging_err_to_js, parse_variogram, set_object_field};
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
 use crate::coord_3d::Coord3D;
 use crate::interop::gslib_anisotropy::{GslibAnisotropy, from_gslib};
+use crate::interop::gslib_directional::GslibDirection;
 use crate::kriging::diagnostics::Prediction3D;
 use crate::kriging::ordinary_3d::{Neighborhood3D, OrdinaryKrigingModel3D};
 use crate::kriging::simple_3d::SimpleKrigingModel3D;
@@ -32,12 +34,8 @@ use crate::planar_dataset_3d::PlanarDataset3D;
 use crate::simulation_3d::{
     Grid3D, SgsError, SgsModel3D, SgsOutputSpace, gaussian_simulation_3d_stream_with,
 };
-use crate::variogram::directional_3d::{
-    DirectionalConfig3D, compute_directional_variogram_3d,
-};
+use crate::variogram::directional_3d::{DirectionalConfig3D, compute_directional_variogram_3d};
 use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal};
-use crate::interop::gslib_directional::GslibDirection;
-use super::{coded_err, kriging_err_to_js, parse_variogram, set_object_field};
 
 // ---------- shared helpers ----------
 
@@ -203,8 +201,8 @@ impl WasmOrdinaryKriging3D {
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
         let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
-        let model =
-            OrdinaryKrigingModel3D::new(dataset, anisotropy, variogram).map_err(kriging_err_to_js)?;
+        let model = OrdinaryKrigingModel3D::new(dataset, anisotropy, variogram)
+            .map_err(kriging_err_to_js)?;
         let model = maybe_with_neighborhood_ok(model, max_radius, max_neighbors)?;
         Ok(Self { inner: model })
     }
@@ -235,12 +233,7 @@ impl WasmOrdinaryKriging3D {
     /// conditionNumbers, usedNuggetInflation }` as parallel
     /// Float64Arrays.
     #[wasm_bindgen(js_name = predictBatch)]
-    pub fn predict_batch(
-        &self,
-        xs: &[f64],
-        ys: &[f64],
-        zs: &[f64],
-    ) -> Result<JsValue, JsValue> {
+    pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
         let coords = to_coords_3d(xs, ys, zs)?;
         let preds = self
             .inner
@@ -317,12 +310,7 @@ impl WasmSimpleKriging3D {
     }
 
     #[wasm_bindgen(js_name = predictBatch)]
-    pub fn predict_batch(
-        &self,
-        xs: &[f64],
-        ys: &[f64],
-        zs: &[f64],
-    ) -> Result<JsValue, JsValue> {
+    pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
         let coords = to_coords_3d(xs, ys, zs)?;
         let preds = self
             .inner
@@ -372,13 +360,8 @@ impl WasmUniversalKriging3D {
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
         let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
-        let model = UniversalKrigingModel3D::new(
-            dataset,
-            anisotropy,
-            variogram,
-            Trend3D::Linear,
-        )
-        .map_err(kriging_err_to_js)?;
+        let model = UniversalKrigingModel3D::new(dataset, anisotropy, variogram, Trend3D::Linear)
+            .map_err(kriging_err_to_js)?;
         Ok(Self { inner: model })
     }
 
@@ -403,12 +386,7 @@ impl WasmUniversalKriging3D {
     }
 
     #[wasm_bindgen(js_name = predictBatch)]
-    pub fn predict_batch(
-        &self,
-        xs: &[f64],
-        ys: &[f64],
-        zs: &[f64],
-    ) -> Result<JsValue, JsValue> {
+    pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
         let coords = to_coords_3d(xs, ys, zs)?;
         let preds = self
             .inner
@@ -475,8 +453,7 @@ pub fn wasm_gaussian_simulation_3d(
         PlanarDataset3D::new(coords, to_real_vec(sample_values)).map_err(kriging_err_to_js)?;
     let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
     let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
-    let model =
-        SgsModel3D::new(dataset, anisotropy, variogram).map_err(sgs_err_to_js)?;
+    let model = SgsModel3D::new(dataset, anisotropy, variogram).map_err(sgs_err_to_js)?;
     let grid = Grid3D::new(
         nx,
         ny,
@@ -504,11 +481,7 @@ pub fn wasm_gaussian_simulation_3d(
             // closure may retain the array.
             let gv_f64: Vec<f64> = gv.iter().map(|v| *v as f64).collect();
             let arr = Float64Array::from(gv_f64.as_slice());
-            let result = on_realization.call2(
-                &this,
-                &JsValue::from_f64(idx as f64),
-                &arr.into(),
-            );
+            let result = on_realization.call2(&this, &JsValue::from_f64(idx as f64), &arr.into());
             match result {
                 Ok(v) if v.is_truthy() => {
                     Err(SgsError::CallbackAborted("closure returned truthy".into()))
@@ -558,8 +531,7 @@ pub fn wasm_compute_directional_variogram_3d(
         ));
     }
     let coords = to_coords_3d(xs, ys, zs)?;
-    let dataset =
-        PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
+    let dataset = PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
     let filter = GslibDirection {
         azm_deg,
         atol_deg,
@@ -576,8 +548,8 @@ pub fn wasm_compute_directional_variogram_3d(
         n_lags,
         estimator: EmpiricalEstimator::Classical,
     };
-    let ev = compute_directional_variogram_3d(&dataset, &filter, &config)
-        .map_err(kriging_err_to_js)?;
+    let ev =
+        compute_directional_variogram_3d(&dataset, &filter, &config).map_err(kriging_err_to_js)?;
 
     let distances: Vec<f64> = ev.distances.iter().map(|d| *d as f64).collect();
     let semivariances: Vec<f64> = ev.semivariances.iter().map(|g| *g as f64).collect();
@@ -643,8 +615,10 @@ pub fn wasm_fit_spherical_3d_joint(
     vertical_semivariances: &[f64],
     vertical_n_pairs: &[f64],
 ) -> Result<JsValue, JsValue> {
-    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
-    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let major =
+        build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor =
+        build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
     let vertical = build_empirical_variogram(
         "vertical",
         vertical_distances,
@@ -680,8 +654,10 @@ pub fn wasm_fit_spherical_3d_two_stage(
     // high-sill solution. Pass 0 to opt out (treat sill as fully free).
     data_variance: f64,
 ) -> Result<JsValue, JsValue> {
-    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
-    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let major =
+        build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor =
+        build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
     let vertical = build_empirical_variogram(
         "vertical",
         vertical_distances,
@@ -689,7 +665,10 @@ pub fn wasm_fit_spherical_3d_two_stage(
         vertical_n_pairs,
     )?;
     let fit = crate::variogram::fitting::fit_spherical_3d_two_stage(
-        &major, &minor, &vertical, data_variance as Real,
+        &major,
+        &minor,
+        &vertical,
+        data_variance as Real,
     )
     .map_err(kriging_err_to_js)?;
     spherical_3d_fit_to_js(&fit)
@@ -712,8 +691,10 @@ pub fn wasm_fit_spherical_3d_fixed_nugget(
     vertical_n_pairs: &[f64],
     nugget: f64,
 ) -> Result<JsValue, JsValue> {
-    let major = build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
-    let minor = build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
+    let major =
+        build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
+    let minor =
+        build_empirical_variogram("minor", minor_distances, minor_semivariances, minor_n_pairs)?;
     let vertical = build_empirical_variogram(
         "vertical",
         vertical_distances,
@@ -721,7 +702,10 @@ pub fn wasm_fit_spherical_3d_fixed_nugget(
         vertical_n_pairs,
     )?;
     let fit = crate::variogram::fitting::fit_spherical_3d_with_fixed_nugget(
-        &major, &minor, &vertical, nugget as Real,
+        &major,
+        &minor,
+        &vertical,
+        nugget as Real,
     )
     .map_err(kriging_err_to_js)?;
     spherical_3d_fit_to_js(&fit)
@@ -762,9 +746,21 @@ fn spherical_3d_fit_to_js(
     let obj = Object::new();
     set_object_field(&obj, "nugget", &JsValue::from_f64(fit.nugget as f64))?;
     set_object_field(&obj, "sill", &JsValue::from_f64(fit.sill as f64))?;
-    set_object_field(&obj, "rangeMajor", &JsValue::from_f64(fit.range_major as f64))?;
-    set_object_field(&obj, "rangeMinor", &JsValue::from_f64(fit.range_minor as f64))?;
-    set_object_field(&obj, "rangeVertical", &JsValue::from_f64(fit.range_vertical as f64))?;
+    set_object_field(
+        &obj,
+        "rangeMajor",
+        &JsValue::from_f64(fit.range_major as f64),
+    )?;
+    set_object_field(
+        &obj,
+        "rangeMinor",
+        &JsValue::from_f64(fit.range_minor as f64),
+    )?;
+    set_object_field(
+        &obj,
+        "rangeVertical",
+        &JsValue::from_f64(fit.range_vertical as f64),
+    )?;
     set_object_field(&obj, "residuals", &JsValue::from_f64(fit.residuals as f64))?;
     Ok(obj.into())
 }
@@ -797,4 +793,3 @@ pub fn wasm_fit_spherical_1d(
     set_object_field(&obj, "residuals", &JsValue::from_f64(fit.residuals as f64))?;
     Ok(obj.into())
 }
-
