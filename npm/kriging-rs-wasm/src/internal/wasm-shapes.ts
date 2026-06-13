@@ -1067,7 +1067,158 @@ export type RawModule = {
     spatialModel: string,
     temporalModel: string
   ) => unknown;
+  WasmOrdinaryKriging3D?: {
+    fromArrays(
+      xs: Float64Array,
+      ys: Float64Array,
+      zs: Float64Array,
+      values: Float64Array,
+      ang1: number,
+      ang2: number,
+      ang3: number,
+      anis1: number,
+      anis2: number,
+      variogramType: string,
+      nugget: number,
+      sill: number,
+      range: number,
+      shape: number | undefined,
+      maxRadius: number | undefined,
+      maxNeighbors: number | undefined
+    ): WasmKriging3DInstance;
+  };
+  WasmSimpleKriging3D?: {
+    fromArrays(
+      xs: Float64Array,
+      ys: Float64Array,
+      zs: Float64Array,
+      values: Float64Array,
+      mean: number,
+      ang1: number,
+      ang2: number,
+      ang3: number,
+      anis1: number,
+      anis2: number,
+      variogramType: string,
+      nugget: number,
+      sill: number,
+      range: number,
+      shape: number | undefined
+    ): WasmKriging3DInstance;
+  };
+  WasmUniversalKriging3D?: {
+    fromArraysLinear(
+      xs: Float64Array,
+      ys: Float64Array,
+      zs: Float64Array,
+      values: Float64Array,
+      ang1: number,
+      ang2: number,
+      ang3: number,
+      anis1: number,
+      anis2: number,
+      variogramType: string,
+      nugget: number,
+      sill: number,
+      range: number,
+      shape: number | undefined
+    ): WasmKriging3DInstance;
+  };
+  gaussianSimulation3D?: (
+    sampleXs: Float64Array,
+    sampleYs: Float64Array,
+    sampleZs: Float64Array,
+    sampleValues: Float64Array,
+    ang1: number,
+    ang2: number,
+    ang3: number,
+    anis1: number,
+    anis2: number,
+    variogramType: string,
+    nugget: number,
+    sill: number,
+    range: number,
+    shape: number | undefined,
+    nx: number,
+    ny: number,
+    nz: number,
+    originX: number,
+    originY: number,
+    originZ: number,
+    spacingX: number,
+    spacingY: number,
+    spacingZ: number,
+    seed: bigint,
+    nRealizations: number,
+    scoreSpace: boolean,
+    onRealization: (idx: number, grid: Float64Array) => unknown
+  ) => void;
+  computeDirectionalVariogram3D?: (
+    xs: Float64Array,
+    ys: Float64Array,
+    zs: Float64Array,
+    values: Float64Array,
+    xlag: number,
+    xltol: number,
+    nLags: number,
+    azmDeg: number,
+    atolDeg: number,
+    bandh: number,
+    dipDeg: number,
+    dtolDeg: number,
+    bandv: number
+  ) => unknown;
+  fitSpherical3DJoint?: (
+    majorDistances: Float64Array,
+    majorSemivariances: Float64Array,
+    majorNPairs: Float64Array,
+    minorDistances: Float64Array,
+    minorSemivariances: Float64Array,
+    minorNPairs: Float64Array,
+    verticalDistances: Float64Array,
+    verticalSemivariances: Float64Array,
+    verticalNPairs: Float64Array
+  ) => unknown;
+  fitSpherical3DTwoStage?: (
+    majorDistances: Float64Array,
+    majorSemivariances: Float64Array,
+    majorNPairs: Float64Array,
+    minorDistances: Float64Array,
+    minorSemivariances: Float64Array,
+    minorNPairs: Float64Array,
+    verticalDistances: Float64Array,
+    verticalSemivariances: Float64Array,
+    verticalNPairs: Float64Array,
+    dataVariance: number
+  ) => unknown;
+  fitSpherical3DFixedNugget?: (
+    majorDistances: Float64Array,
+    majorSemivariances: Float64Array,
+    majorNPairs: Float64Array,
+    minorDistances: Float64Array,
+    minorSemivariances: Float64Array,
+    minorNPairs: Float64Array,
+    verticalDistances: Float64Array,
+    verticalSemivariances: Float64Array,
+    verticalNPairs: Float64Array,
+    nugget: number
+  ) => unknown;
+  fitSpherical1D?: (
+    distances: Float64Array,
+    semivariances: Float64Array,
+    nPairs: Float64Array
+  ) => unknown;
 };
+
+/**
+ * WASM 3-D kriging instance shape, shared by the ordinary / simple / universal
+ * classes (they expose identical predict surfaces).
+ */
+export interface WasmKriging3DInstance {
+  predict(x: number, y: number, z: number): unknown;
+  predictBatch(xs: Float64Array, ys: Float64Array, zs: Float64Array): unknown;
+  free?: () => void;
+}
 
 /** WASM space-time continuous kriging instance shape (ordinary / simple / universal / projected). */
 export interface WasmSpaceTimeInstance {

@@ -1,6 +1,15 @@
 import {
   BinomialKriging,
   OrdinaryKriging,
+  OrdinaryKriging3D,
+  SimpleKriging3D,
+  UniversalKriging3D,
+  computeDirectionalVariogram3D,
+  fitSpherical1D,
+  fitSpherical3DFixedNugget,
+  fitSpherical3DJoint,
+  fitSpherical3DTwoStage,
+  gaussianSimulation3D,
   SpaceTimeBinomialKriging,
   SpaceTimeOrdinaryKriging,
   SpaceTimeProjectedOrdinaryKriging,
@@ -35,9 +44,15 @@ import {
   type CvResult,
   type EmpiricalSpaceTimeVariogramResult,
   type FitSpaceTimeVariogramResult,
+  type Batch3DArrayOutput,
+  type DirectionalVariogram3DResult,
+  type FittedSpherical1D,
+  type FittedSpherical3D,
+  type GaussianSimulation3DResult,
   type OrdinaryBatchArrayOutput,
   type OrdinaryPrediction,
   type OrdinaryGridOutput,
+  type Prediction3D,
   type PredictGridOptions,
   type SpaceTimeVariogramParams,
   type VariogramTypeName,
@@ -463,3 +478,121 @@ const _snakeCaseRejected: SpaceTimeVariogramParams = {
   k2: 0,
   k3: 0,
 };
+
+// ---------- 3-D kriging / variography / SGS contracts ----------
+
+const xs3 = new Float64Array([0, 1, 2]);
+const ys3 = new Float64Array([0, 1, 2]);
+const zs3 = new Float64Array([0, 1, 2]);
+const values3 = new Float64Array([3, 4, 5]);
+const variogram3d = {
+  variogramType: variogram,
+  nugget: 0.01,
+  sill: 1.0,
+  range: 100,
+};
+
+const ok3d = new OrdinaryKriging3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  variogram: variogram3d,
+  anisotropy: { ang1: 0, ang2: 0, ang3: 0, anis1: 1, anis2: 1 },
+  neighborhood: { maxNeighbors: 8, maxRadius: 50 },
+});
+const pred3d = ok3d.predict(0.5, 0.5, 0.5);
+const batch3d = ok3d.predictBatch(xs3, ys3, zs3);
+
+const _pred3dNotAny: AssertNotAny<typeof pred3d> = true;
+const _batch3dNotAny: AssertNotAny<typeof batch3d> = true;
+const _pred3dType: Prediction3D = pred3d;
+const _pred3dInflation: boolean = pred3d.usedNuggetInflation;
+const _batch3dType: Batch3DArrayOutput = batch3d;
+const _batch3dCond: Float64Array = batch3d.conditionNumbers;
+
+const sk3d = new SimpleKriging3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  variogram: variogram3d,
+  mean: 4,
+});
+const _sk3dPred: Prediction3D = sk3d.predict(0.5, 0.5, 0.5);
+
+const uk3d = new UniversalKriging3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  variogram: variogram3d,
+});
+const _uk3dPred: Prediction3D = uk3d.predict(0.5, 0.5, 0.5);
+
+const dir3d = computeDirectionalVariogram3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  lagDistance: 1,
+  nLags: 10,
+  azimuthDeg: 0,
+  dipDeg: 0,
+});
+const _dir3dNotAny: AssertNotAny<typeof dir3d> = true;
+const _dir3dType: DirectionalVariogram3DResult = dir3d;
+const _dir3dPairs: Uint32Array = dir3d.nPairs;
+
+const axis = {
+  distances: dir3d.distances,
+  semivariances: dir3d.semivariances,
+  nPairs: dir3d.nPairs,
+};
+const fit3dJoint = fitSpherical3DJoint({
+  major: axis,
+  minor: axis,
+  vertical: axis,
+});
+const _fit3dNotAny: AssertNotAny<typeof fit3dJoint> = true;
+const _fit3dType: FittedSpherical3D = fit3dJoint;
+const _fit3dTwoStage: FittedSpherical3D = fitSpherical3DTwoStage({
+  major: axis,
+  minor: axis,
+  vertical: axis,
+  dataVariance: 1.0,
+});
+const _fit3dFixed: FittedSpherical3D = fitSpherical3DFixedNugget({
+  major: axis,
+  minor: axis,
+  vertical: axis,
+  nugget: 0.05,
+});
+const _fit1d: FittedSpherical1D = fitSpherical1D(axis);
+
+const sgs3dResult = gaussianSimulation3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  variogram: variogram3d,
+  grid: {
+    nx: 4,
+    ny: 4,
+    nz: 2,
+    originX: 0,
+    originY: 0,
+    originZ: 0,
+    spacingX: 1,
+    spacingY: 1,
+    spacingZ: 1,
+  },
+  seed: 42n,
+  nRealizations: 2,
+  onRealization: (idx: number, grid: Float64Array) => {
+    void idx;
+    return grid.length === 0;
+  },
+});
+const _sgs3dNotAny: AssertNotAny<typeof sgs3dResult> = true;
+const _sgs3dType: GaussianSimulation3DResult = sgs3dResult;

@@ -32,4 +32,21 @@ declare module "../pkg/kriging_rs.js" {
     variogramType: number
   ) => unknown;
   export const webgpuAvailable: (...args: unknown[]) => Promise<unknown>;
+
+  /** 3-D kriging classes; instance shapes in internal/wasm-shapes.ts. */
+  export const WasmOrdinaryKriging3D: {
+    fromArrays(...args: unknown[]): unknown;
+  };
+  export const WasmSimpleKriging3D: {
+    fromArrays(...args: unknown[]): unknown;
+  };
+  export const WasmUniversalKriging3D: {
+    fromArraysLinear(...args: unknown[]): unknown;
+  };
+  export const gaussianSimulation3D: (...args: unknown[]) => void;
+  export const computeDirectionalVariogram3D: (...args: unknown[]) => unknown;
+  export const fitSpherical3DJoint: (...args: unknown[]) => unknown;
+  export const fitSpherical3DTwoStage: (...args: unknown[]) => unknown;
+  export const fitSpherical3DFixedNugget: (...args: unknown[]) => unknown;
+  export const fitSpherical1D: (...args: unknown[]) => unknown;
 }

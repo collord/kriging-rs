@@ -1361,7 +1361,9 @@ export type KrigingErrorCode =
   | "internal_error"
   | "unknown_family"
   | "unknown_trend"
-  | "unknown_estimator";
+  | "unknown_estimator"
+  | "insufficient_data"
+  | "callback_aborted";
 
 // ---------------------------------------------------------------------------
 // Spatio-temporal kriging types
@@ -1722,4 +1724,298 @@ export interface ConditionalSimulateSpaceTimeBinomialOptions {
   seed?: number | bigint;
   /** Optional permutation of `0..nTargets` giving the visit order. */
   targetOrder?: ArrayLike<number> | Uint32Array;
+}
+
+// ---------------------------------------------------------------------------
+// 3-D kriging, variography, and sequential Gaussian simulation
+// ---------------------------------------------------------------------------
+
+/**
+ * GSLib-convention anisotropy parameters for the 3-D models. All 3-D classes and
+ * functions accept this shape; omit it (or pass the identity `{ ang1: 0, ang2: 0,
+ * ang3: 0, anis1: 1, anis2: 1 }`) for isotropic behavior.
+ *
+ * Angles are in degrees and follow GSLib's `setrot` convention: `ang1` is the
+ * azimuth of the major axis (clockwise from north), `ang2` the dip, `ang3` the
+ * plunge/rake. `anis1` is the minor/major range ratio and `anis2` the
+ * vertical/major range ratio, both in `(0, 1]`.
+ */
+export interface Anisotropy3DParams {
+  /** Azimuth of the major axis in degrees (clockwise from north). */
+  ang1: number;
+  /** Dip of the major axis in degrees. */
+  ang2: number;
+  /** Third rotation (plunge/rake) in degrees. */
+  ang3: number;
+  /** Minor/major range ratio in (0, 1]. */
+  anis1: number;
+  /** Vertical/major range ratio in (0, 1]. */
+  anis2: number;
+}
+
+/**
+ * Result of a single 3-D kriging prediction. In addition to the value and
+ * variance, the 3-D solver reports conditioning diagnostics: the covariance
+ * matrix condition number and whether nugget inflation was applied to rescue
+ * an ill-conditioned system.
+ */
+export interface Prediction3D {
+  value: number;
+  variance: number;
+  /** Condition number of the kriging system's covariance matrix. */
+  conditionNumber: number;
+  /** True when the solver inflated the nugget to stabilize an ill-conditioned system. */
+  usedNuggetInflation: boolean;
+}
+
+/**
+ * Batch 3-D kriging output as parallel typed arrays (avoids per-point object
+ * allocation). `usedNuggetInflation` holds `0` / `1` flags, one per target.
+ */
+export interface Batch3DArrayOutput {
+  values: Float64Array;
+  variances: Float64Array;
+  conditionNumbers: Float64Array;
+  /** Per-target nugget-inflation flags as 0/1 values. */
+  usedNuggetInflation: Float64Array;
+}
+
+/**
+ * Search-neighborhood restriction for a 3-D kriging model. Distances are
+ * anisotropic Euclidean in coordinate units (not kilometers). When both fields
+ * are given, the intersection applies (k-nearest within radius).
+ */
+export interface Neighborhood3DOptions {
+  /** Keep only the `k` closest samples at each prediction location. */
+  maxNeighbors?: number;
+  /** Keep only samples within this (anisotropic) distance in coordinate units. */
+  maxRadius?: number;
+}
+
+/**
+ * Options for constructing an {@link OrdinaryKriging3D} model. Coordinates are
+ * arbitrary Cartesian `(x, y, z)` values (e.g. meters) with z positive upward;
+ * the variogram range must be in the same linear units.
+ */
+export interface OrdinaryKriging3DOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  zs: NumericArrayInput;
+  values: NumericArrayInput;
+  variogram: VariogramParams;
+  /** GSLib anisotropy parameters; omit for isotropic. */
+  anisotropy?: Anisotropy3DParams;
+  /** Optional kd-tree search neighborhood; omit to use all samples. */
+  neighborhood?: Neighborhood3DOptions;
+}
+
+/**
+ * Options for constructing a {@link SimpleKriging3D} model (known global mean).
+ */
+export interface SimpleKriging3DOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  zs: NumericArrayInput;
+  values: NumericArrayInput;
+  variogram: VariogramParams;
+  /** Known mean used for the residual kriging system. */
+  mean: number;
+  /** GSLib anisotropy parameters; omit for isotropic. */
+  anisotropy?: Anisotropy3DParams;
+}
+
+/**
+ * Options for constructing a {@link UniversalKriging3D} model. The drift basis
+ * is linear, `[1, x, y, z]` (the only basis exposed in v1).
+ */
+export interface UniversalKriging3DOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  zs: NumericArrayInput;
+  values: NumericArrayInput;
+  variogram: VariogramParams;
+  /** GSLib anisotropy parameters; omit for isotropic. */
+  anisotropy?: Anisotropy3DParams;
+}
+
+/**
+ * Options for {@link computeDirectionalVariogram3D}: gamv-style lag-centred
+ * binning with a cone + bandwidth direction filter.
+ *
+ * For an omnidirectional variogram pass `azimuthToleranceDeg: 90`,
+ * `dipToleranceDeg: 90`, and leave the bandwidths at their (effectively
+ * unbounded) defaults; the engine detects this and double-counts pairs to
+ * match GSLib `gamv`.
+ */
+export interface DirectionalVariogram3DOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  zs: NumericArrayInput;
+  values: NumericArrayInput;
+  /** Lag separation distance (gamv `xlag`), in coordinate units. */
+  lagDistance: number;
+  /** Half-window around each lag centre (gamv `xltol`). Defaults to `lagDistance / 2`. */
+  lagTolerance?: number;
+  /** Number of lags. */
+  nLags: number;
+  /** Azimuth of the direction vector in degrees (GSLib convention, clockwise from north). */
+  azimuthDeg: number;
+  /** Half-angle azimuth tolerance in degrees (default 22.5). */
+  azimuthToleranceDeg?: number;
+  /** Dip of the direction vector in degrees. */
+  dipDeg: number;
+  /** Half-angle dip tolerance in degrees (default 22.5). */
+  dipToleranceDeg?: number;
+  /** Horizontal bandwidth (gamv `bandwh`), coordinate units. Defaults to unbounded. */
+  horizontalBandwidth?: number;
+  /** Vertical bandwidth (gamv `bandwd`), coordinate units. Defaults to unbounded. */
+  verticalBandwidth?: number;
+}
+
+/**
+ * Result of {@link computeDirectionalVariogram3D}: parallel arrays aligned by
+ * lag index. Empty lags are omitted, so the length is the number of non-empty
+ * bins (≤ `nLags`).
+ */
+export interface DirectionalVariogram3DResult {
+  distances: Float64Array;
+  semivariances: Float64Array;
+  /** Pair counts per non-empty lag. */
+  nPairs: Uint32Array;
+}
+
+/**
+ * One axis worth of experimental variogram, as inputs to the 3-D spherical
+ * fitting functions: parallel arrays of bin distances, semivariances, and pair
+ * counts (the counts weight the loss). Typically the output of
+ * {@link computeDirectionalVariogram3D} along a major / minor / vertical axis.
+ */
+export interface AxisVariogramInput {
+  distances: NumericArrayInput;
+  semivariances: NumericArrayInput;
+  nPairs: NumericArrayInput;
+}
+
+/**
+ * Options for {@link fitSpherical3DJoint}: three axis-aligned experimental
+ * variograms fitted jointly to one anisotropic spherical model.
+ */
+export interface FitSpherical3DOptions {
+  major: AxisVariogramInput;
+  minor: AxisVariogramInput;
+  vertical: AxisVariogramInput;
+}
+
+/**
+ * Options for {@link fitSpherical3DTwoStage}. Stage 1 fits nugget, sill, and
+ * vertical range on the vertical experimental alone; stage 2 holds those and
+ * fits the horizontal ranges.
+ */
+export interface FitSpherical3DTwoStageOptions extends FitSpherical3DOptions {
+  /**
+   * Sample variance of the underlying data; anchors the stage-1 sill so a
+   * not-yet-plateaued vertical curve cannot drive the fit degenerate. Pass 0
+   * (or omit) to leave the sill fully free.
+   */
+  dataVariance?: number;
+}
+
+/**
+ * Options for {@link fitSpherical3DFixedNugget}: refit with the nugget held at
+ * a user-supplied value (e.g. read off the vertical's short-lag intercept).
+ */
+export interface FitSpherical3DFixedNuggetOptions
+  extends FitSpherical3DOptions {
+  /** Nugget value to hold fixed during the fit. */
+  nugget: number;
+}
+
+/**
+ * A fitted 3-D anisotropic spherical variogram: one nugget and sill with
+ * per-axis ranges. Drives 3-D kriging via {@link Anisotropy3DParams} (range
+ * ratios) plus a spherical {@link VariogramParams} with `range: rangeMajor`.
+ */
+export interface FittedSpherical3D {
+  nugget: number;
+  sill: number;
+  rangeMajor: number;
+  rangeMinor: number;
+  rangeVertical: number;
+  /** Sum of weighted squared residuals at the optimum. */
+  residuals: number;
+}
+
+/** Options for {@link fitSpherical1D}: one axis worth of experimental variogram. */
+export type FitSpherical1DOptions = AxisVariogramInput;
+
+/** A fitted 1-D spherical variogram (single range; see {@link fitSpherical1D}). */
+export interface FittedSpherical1D {
+  nugget: number;
+  sill: number;
+  range: number;
+  residuals: number;
+}
+
+/**
+ * Regular 3-D simulation grid: `nx × ny × nz` cells with the given origin and
+ * spacing. Realization arrays are laid out x-fastest: linear index
+ * `i + nx * j + nx * ny * k` for cell `(i, j, k)`.
+ */
+export interface Grid3DOptions {
+  nx: number;
+  ny: number;
+  nz: number;
+  originX: number;
+  originY: number;
+  originZ: number;
+  spacingX: number;
+  spacingY: number;
+  spacingZ: number;
+}
+
+/**
+ * Per-realization callback for {@link gaussianSimulation3D}. Receives the
+ * realization index and the full grid as a fresh `Float64Array` (safe to
+ * retain). Return `true` to abort the remaining realizations; any other
+ * return value continues.
+ */
+export type Realization3DCallback = (
+  realizationIndex: number,
+  grid: Float64Array
+) => boolean | void;
+
+/**
+ * Options for {@link gaussianSimulation3D}: 3-D sequential Gaussian simulation
+ * conditioned on the samples, streaming one realization at a time through
+ * {@link GaussianSimulation3DOptions.onRealization}. Cells whose kriging
+ * system fails are marked `NaN` rather than silently filled.
+ */
+export interface GaussianSimulation3DOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  zs: NumericArrayInput;
+  values: NumericArrayInput;
+  variogram: VariogramParams;
+  /** GSLib anisotropy parameters; omit for isotropic. */
+  anisotropy?: Anisotropy3DParams;
+  grid: Grid3DOptions;
+  /** RNG seed for reproducibility (defaults to `0n`). */
+  seed?: number | bigint;
+  /** Number of realizations to stream (must be >= 1). */
+  nRealizations: number;
+  /**
+   * When true, realizations are returned as raw normal scores instead of
+   * back-transformed data-space values. Default false.
+   */
+  scoreSpace?: boolean;
+  /** Called once per realization, in realization-index order. */
+  onRealization: Realization3DCallback;
+}
+
+/**
+ * Result of {@link gaussianSimulation3D}. `aborted` is true when the callback
+ * stopped the stream early by returning `true`.
+ */
+export interface GaussianSimulation3DResult {
+  aborted: boolean;
 }

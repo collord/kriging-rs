@@ -26,6 +26,17 @@ export { UniversalKriging } from "./kriging/universal.js";
 export { ProjectedKriging } from "./kriging/projected.js";
 export { BinomialKriging } from "./kriging/binomial.js";
 export { BinomialProjectedKriging } from "./kriging/binomial-projected.js";
+export { OrdinaryKriging3D } from "./kriging/ordinary-3d.js";
+export { SimpleKriging3D } from "./kriging/simple-3d.js";
+export { UniversalKriging3D } from "./kriging/universal-3d.js";
+export {
+  computeDirectionalVariogram3D,
+  fitSpherical1D,
+  fitSpherical3DFixedNugget,
+  fitSpherical3DJoint,
+  fitSpherical3DTwoStage,
+} from "./variogram-3d.js";
+export { gaussianSimulation3D } from "./simulate-3d.js";
 export {
   computeDirectionalEmpiricalVariogram,
   computeEmpiricalVariogram,
@@ -113,6 +124,9 @@ export { datesFromTimes, timesFromDates } from "./time.js";
 
 export type {
   AggregatePrevalenceByPolygonOptions,
+  Anisotropy3DParams,
+  AxisVariogramInput,
+  Batch3DArrayOutput,
   BinomialBatchArrayOutput,
   BinomialBuildNotes,
   BinomialCvResidual,
@@ -155,11 +169,22 @@ export type {
   DateAxisOptions,
   CvResult,
   CvSummary,
+  DirectionalVariogram3DOptions,
+  DirectionalVariogram3DResult,
   EmpiricalEstimator,
   EmpiricalVariogramResult,
+  FitSpherical1DOptions,
+  FitSpherical3DFixedNuggetOptions,
+  FitSpherical3DOptions,
+  FitSpherical3DTwoStageOptions,
   FitVariogramOptions,
+  FittedSpherical1D,
+  FittedSpherical3D,
   FittedVariogram,
+  GaussianSimulation3DOptions,
+  GaussianSimulation3DResult,
   GeoGridBounds,
+  Grid3DOptions,
   IntegerArrayInput,
   InterpolateBinomialToGridOptions,
   InterpolateBinomialToGridResult,
@@ -185,15 +210,18 @@ export type {
   LeaveOneOutSpaceTimeSimpleOptions,
   LeaveOneOutSpaceTimeUniversalOptions,
   LeaveOneOutUniversalOptions,
+  Neighborhood3DOptions,
   NeighborhoodOptions,
   NestedVariogramComponent,
   NestedVariogramEvaluation,
   NumericArrayInput,
   OrdinaryBatchArrayOutput,
   OrdinaryGridOutput,
+  OrdinaryKriging3DOptions,
   OrdinaryKrigingFromFittedOptions,
   OrdinaryKrigingOptions,
   OrdinaryPrediction,
+  Prediction3D,
   PolygonAggregateResult,
   PolygonCells,
   PolygonCellsFromMaskOptions,
@@ -201,6 +229,8 @@ export type {
   PredictGridAtTimeOptions,
   PredictGridOptions,
   ProjectedKrigingOptions,
+  Realization3DCallback,
+  SimpleKriging3DOptions,
   SimpleKrigingOptions,
   SimulateBinomialGridEnsembleOptions,
   SimulateBinomialGridOptions,
@@ -211,6 +241,7 @@ export type {
   SimulateBinomialSpaceTimeGridOptions,
   SimulateBinomialSpaceTimeGridSummaryAtDateOptions,
   SimulateBinomialSpaceTimeGridSummaryOptions,
+  UniversalKriging3DOptions,
   UniversalKrigingOptions,
   UniversalTrend,
   VariogramParams,

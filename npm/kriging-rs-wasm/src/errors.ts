@@ -42,6 +42,8 @@ const KNOWN_ERROR_CODES: readonly KrigingErrorCode[] = [
   "invalid_input",
   "backend_unavailable",
   "internal_error",
+  "insufficient_data",
+  "callback_aborted",
 ];
 
 /**

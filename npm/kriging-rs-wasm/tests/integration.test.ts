@@ -78,9 +78,19 @@ import {
   polygonCellsFromMask,
   evaluateNestedVariogram,
   VariogramType,
+  OrdinaryKriging3D,
+  SimpleKriging3D,
+  UniversalKriging3D,
+  computeDirectionalVariogram3D,
+  fitSpherical1D,
+  fitSpherical3DFixedNugget,
+  fitSpherical3DJoint,
+  fitSpherical3DTwoStage,
+  gaussianSimulation3D,
   type OrdinaryPrediction,
   type BinomialPrediction,
   type VariogramTypeName,
+  type Prediction3D,
 } from "../dist/index.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -3684,5 +3694,423 @@ describe("Polygon aggregation over ensembles", () => {
         ],
       })
     ).toThrow(KrigingError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3-D kriging, variography, and SGS
+// ---------------------------------------------------------------------------
+
+/** 8 corners of a 10-unit cube plus its center, with a linear field. */
+function cubeSamples3D() {
+  const xs = [0, 10, 0, 10, 0, 10, 0, 10, 5];
+  const ys = [0, 0, 10, 10, 0, 0, 10, 10, 5];
+  const zs = [0, 0, 0, 0, 10, 10, 10, 10, 5];
+  const values = xs.map((x, i) => 1 + 2 * x + 3 * ys[i] + 4 * zs[i]);
+  return { xs, ys, zs, values };
+}
+
+/** Regular n^3 grid with a smooth correlated field plus deterministic jitter. */
+function gridSamples3D(n: number) {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+  const values: number[] = [];
+  for (let k = 0; k < n; k++) {
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const x = i * 2;
+        const y = j * 2;
+        const z = k * 2;
+        xs.push(x);
+        ys.push(y);
+        zs.push(z);
+        values.push(
+          Math.sin(x / 5) + Math.cos(y / 5) + 0.5 * Math.sin(z / 3) +
+            0.1 * Math.sin(7.3 * i + 11.9 * j + 17.7 * k)
+        );
+      }
+    }
+  }
+  return { xs, ys, zs, values };
+}
+
+const VARIOGRAM_3D = {
+  variogramType: "exponential" as VariogramTypeName,
+  nugget: 0.01,
+  sill: 100.0,
+  range: 15.0,
+};
+
+describe("3-D ordinary kriging", () => {
+  test("predict returns finite value, variance, and diagnostics", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const model = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+    });
+    try {
+      const pred: Prediction3D = model.predict(5, 5, 5);
+      expect(Number.isFinite(pred.value)).toBe(true);
+      expect(Number.isFinite(pred.variance)).toBe(true);
+      expect(Number.isFinite(pred.conditionNumber)).toBe(true);
+      expect(typeof pred.usedNuggetInflation).toBe("boolean");
+    } finally {
+      model.free();
+    }
+  });
+
+  test("predictBatch returns parallel typed arrays", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const model = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+    });
+    try {
+      const out = model.predictBatch([5, 2, 8], [5, 3, 7], [5, 4, 6]);
+      expect(out.values).toBeInstanceOf(Float64Array);
+      expect(out.values.length).toBe(3);
+      expect(out.variances.length).toBe(3);
+      expect(out.conditionNumbers.length).toBe(3);
+      expect(out.usedNuggetInflation.length).toBe(3);
+      for (const v of out.values) expect(Number.isFinite(v)).toBe(true);
+    } finally {
+      model.free();
+    }
+  });
+
+  test("anisotropy changes the prediction", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const iso = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+    });
+    const aniso = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+      anisotropy: { ang1: 0, ang2: 0, ang3: 0, anis1: 1, anis2: 0.1 },
+    });
+    try {
+      // Off the symmetry axes so the stretch is detectable.
+      const a = iso.predict(2, 4, 1.5);
+      const b = aniso.predict(2, 4, 1.5);
+      expect(Math.abs(a.value - b.value)).toBeGreaterThan(1e-3);
+    } finally {
+      iso.free();
+      aniso.free();
+    }
+  });
+
+  test("neighborhood restriction still predicts finite values", () => {
+    const { xs, ys, zs, values } = gridSamples3D(4);
+    const model = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: { ...VARIOGRAM_3D, sill: 1.0 },
+      neighborhood: { maxNeighbors: 8 },
+    });
+    try {
+      const pred = model.predict(3, 3, 3);
+      expect(Number.isFinite(pred.value)).toBe(true);
+    } finally {
+      model.free();
+    }
+  });
+
+  test("mismatched array lengths throw KrigingError with stable code", () => {
+    const { xs, ys, zs } = cubeSamples3D();
+    expect(() => {
+      new OrdinaryKriging3D({
+        xs,
+        ys,
+        zs,
+        values: [1, 2],
+        variogram: VARIOGRAM_3D,
+      });
+    }).toThrow(KrigingError);
+    try {
+      new OrdinaryKriging3D({
+        xs,
+        ys,
+        zs,
+        values: [1, 2],
+        variogram: VARIOGRAM_3D,
+      });
+    } catch (e) {
+      expect((e as KrigingError).code).toBe("mismatched_arrays");
+    }
+  });
+
+  test("free() makes subsequent use throw model_freed", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const model = new OrdinaryKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+    });
+    model.free();
+    model.free(); // second free is a no-op
+    try {
+      model.predict(5, 5, 5);
+      expect.unreachable("predict after free must throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(KrigingError);
+      expect((e as KrigingError).code).toBe("model_freed");
+    }
+  });
+});
+
+describe("3-D simple kriging", () => {
+  test("predict with known mean returns finite values", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const model = new SimpleKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+      mean,
+    });
+    try {
+      const pred = model.predict(5, 5, 5);
+      expect(Number.isFinite(pred.value)).toBe(true);
+      expect(Number.isFinite(pred.variance)).toBe(true);
+      const batch = model.predictBatch([5], [5], [5]);
+      expect(batch.values.length).toBe(1);
+    } finally {
+      model.free();
+    }
+  });
+});
+
+describe("3-D universal kriging", () => {
+  test("recovers a linear trend at an interior point", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    const model = new UniversalKriging3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+    });
+    try {
+      const pred = model.predict(5, 5, 5);
+      const expected = 1 + 2 * 5 + 3 * 5 + 4 * 5;
+      expect(Math.abs(pred.value - expected)).toBeLessThan(1.0);
+    } finally {
+      model.free();
+    }
+  });
+});
+
+describe("3-D directional variogram and spherical fits", () => {
+  const { xs, ys, zs, values } = gridSamples3D(5);
+
+  test("directional variogram returns aligned non-empty bins", () => {
+    const result = computeDirectionalVariogram3D({
+      xs,
+      ys,
+      zs,
+      values,
+      lagDistance: 2,
+      nLags: 5,
+      azimuthDeg: 0,
+      dipDeg: 0,
+    });
+    expect(result.distances.length).toBeGreaterThan(0);
+    expect(result.semivariances.length).toBe(result.distances.length);
+    expect(result.nPairs.length).toBe(result.distances.length);
+    expect(result.nPairs).toBeInstanceOf(Uint32Array);
+    for (const g of result.semivariances) {
+      expect(Number.isFinite(g)).toBe(true);
+      expect(g).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test("omnidirectional collects more pairs than a narrow cone", () => {
+    const narrow = computeDirectionalVariogram3D({
+      xs,
+      ys,
+      zs,
+      values,
+      lagDistance: 2,
+      nLags: 5,
+      azimuthDeg: 0,
+      dipDeg: 0,
+    });
+    const omni = computeDirectionalVariogram3D({
+      xs,
+      ys,
+      zs,
+      values,
+      lagDistance: 2,
+      nLags: 5,
+      azimuthDeg: 0,
+      azimuthToleranceDeg: 90,
+      dipDeg: 0,
+      dipToleranceDeg: 90,
+    });
+    const total = (r: { nPairs: Uint32Array }) =>
+      [...r.nPairs].reduce((a, b) => a + b, 0);
+    expect(total(omni)).toBeGreaterThan(total(narrow));
+  });
+
+  test("spherical fits return positive parameters on all entry points", () => {
+    const axis = computeDirectionalVariogram3D({
+      xs,
+      ys,
+      zs,
+      values,
+      lagDistance: 2,
+      nLags: 5,
+      azimuthDeg: 0,
+      azimuthToleranceDeg: 90,
+      dipDeg: 0,
+      dipToleranceDeg: 90,
+    });
+    const input = { major: axis, minor: axis, vertical: axis };
+
+    const joint = fitSpherical3DJoint(input);
+    expect(joint.sill).toBeGreaterThan(0);
+    expect(joint.rangeMajor).toBeGreaterThan(0);
+    expect(joint.rangeMinor).toBeGreaterThan(0);
+    expect(joint.rangeVertical).toBeGreaterThan(0);
+    expect(Number.isFinite(joint.residuals)).toBe(true);
+
+    const variance =
+      values.reduce((a, b) => a + (b - 0) * (b - 0), 0) / values.length;
+    const twoStage = fitSpherical3DTwoStage({
+      ...input,
+      dataVariance: variance,
+    });
+    expect(twoStage.sill).toBeGreaterThan(0);
+
+    const fixed = fitSpherical3DFixedNugget({ ...input, nugget: 0.05 });
+    // The engine stores parameters as f32, so the held nugget round-trips
+    // with single precision.
+    expect(fixed.nugget).toBeCloseTo(0.05, 6);
+
+    const oneD = fitSpherical1D(axis);
+    expect(oneD.sill).toBeGreaterThan(0);
+    expect(oneD.range).toBeGreaterThan(0);
+  });
+});
+
+describe("3-D sequential Gaussian simulation", () => {
+  const { xs, ys, zs, values } = cubeSamples3D();
+  const GRID = {
+    nx: 4,
+    ny: 4,
+    nz: 2,
+    originX: 0,
+    originY: 0,
+    originZ: 0,
+    spacingX: 2.5,
+    spacingY: 2.5,
+    spacingZ: 5,
+  };
+
+  test("streams realizations in order as fresh Float64Arrays", () => {
+    const seen: number[] = [];
+    const grids: Float64Array[] = [];
+    const result = gaussianSimulation3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+      grid: GRID,
+      seed: 42,
+      nRealizations: 3,
+      onRealization: (idx, grid) => {
+        seen.push(idx);
+        grids.push(grid);
+      },
+    });
+    expect(result.aborted).toBe(false);
+    expect(seen).toEqual([0, 1, 2]);
+    for (const grid of grids) {
+      expect(grid).toBeInstanceOf(Float64Array);
+      expect(grid.length).toBe(GRID.nx * GRID.ny * GRID.nz);
+    }
+    // Retained arrays must be distinct buffers, not a reused one.
+    expect(grids[0]).not.toBe(grids[1]);
+  });
+
+  test("same seed reproduces the same realization", () => {
+    const run = (seed: number): Float64Array => {
+      let first: Float64Array | undefined;
+      gaussianSimulation3D({
+        xs,
+        ys,
+        zs,
+        values,
+        variogram: VARIOGRAM_3D,
+        grid: GRID,
+        seed,
+        nRealizations: 1,
+        onRealization: (_idx, grid) => {
+          first = grid;
+        },
+      });
+      return first!;
+    };
+    expect([...run(7)]).toEqual([...run(7)]);
+  });
+
+  test("returning true aborts the stream", () => {
+    const seen: number[] = [];
+    const result = gaussianSimulation3D({
+      xs,
+      ys,
+      zs,
+      values,
+      variogram: VARIOGRAM_3D,
+      grid: GRID,
+      seed: 42,
+      nRealizations: 5,
+      onRealization: (idx) => {
+        seen.push(idx);
+        return idx === 1;
+      },
+    });
+    expect(result.aborted).toBe(true);
+    expect(seen).toEqual([0, 1]);
+  });
+
+  test("a callback exception propagates to the caller", () => {
+    const boom = new Error("stop the presses");
+    expect(() =>
+      gaussianSimulation3D({
+        xs,
+        ys,
+        zs,
+        values,
+        variogram: VARIOGRAM_3D,
+        grid: GRID,
+        seed: 42,
+        nRealizations: 3,
+        onRealization: () => {
+          throw boom;
+        },
+      })
+    ).toThrow(boom);
   });
 });

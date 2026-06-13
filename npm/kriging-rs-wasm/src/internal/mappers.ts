@@ -6,6 +6,7 @@
  */
 
 import type {
+  Batch3DArrayOutput,
   BinomialBatchArrayOutput,
   BinomialBuildNotes,
   BinomialCvResidual,
@@ -16,12 +17,16 @@ import type {
   CvResidual,
   CvResult,
   CvSummary,
+  DirectionalVariogram3DResult,
   EmpiricalSpaceTimeVariogramResult,
   EmpiricalVariogramResult,
   FitSpaceTimeVariogramResult,
   FittedSpaceTimeVariogram,
+  FittedSpherical1D,
+  FittedSpherical3D,
   OrdinaryBatchArrayOutput,
   OrdinaryPrediction,
+  Prediction3D,
   VariogramParams,
   VariogramTypeName,
 } from "../types.js";
@@ -343,5 +348,62 @@ export function mapFitSpaceTimeVariogramResult(
   return {
     empirical: mapEmpiricalSpaceTimeVariogram(rec.empirical),
     fit: mapFittedSpaceTimeVariogram(rec.fit),
+  };
+}
+
+export function mapPrediction3D(value: unknown): Prediction3D {
+  const item = asRecord(value);
+  if (typeof item.usedNuggetInflation !== "boolean") {
+    throw new Error("Expected boolean usedNuggetInflation from WASM");
+  }
+  return {
+    value: requireNumber(item.value),
+    variance: requireNumber(item.variance),
+    conditionNumber: requireNumber(item.conditionNumber),
+    usedNuggetInflation: item.usedNuggetInflation,
+  };
+}
+
+export function mapBatch3DArrayOutput(value: unknown): Batch3DArrayOutput {
+  const rec = asRecord(value);
+  return {
+    values: requireFloat64Array(rec.values),
+    variances: requireFloat64Array(rec.variances),
+    conditionNumbers: requireFloat64Array(rec.conditionNumbers),
+    usedNuggetInflation: requireFloat64Array(rec.usedNuggetInflation),
+  };
+}
+
+export function mapDirectionalVariogram3DResult(
+  value: unknown
+): DirectionalVariogram3DResult {
+  const rec = asRecord(value);
+  return {
+    distances: requireFloat64Array(rec.distances),
+    semivariances: requireFloat64Array(rec.semivariances),
+    // The WASM side ships pair counts as a Float64Array; counts are integral.
+    nPairs: Uint32Array.from(requireFloat64Array(rec.nPairs)),
+  };
+}
+
+export function mapFittedSpherical3D(value: unknown): FittedSpherical3D {
+  const rec = asRecord(value);
+  return {
+    nugget: requireNumber(rec.nugget),
+    sill: requireNumber(rec.sill),
+    rangeMajor: requireNumber(rec.rangeMajor),
+    rangeMinor: requireNumber(rec.rangeMinor),
+    rangeVertical: requireNumber(rec.rangeVertical),
+    residuals: requireNumber(rec.residuals),
+  };
+}
+
+export function mapFittedSpherical1D(value: unknown): FittedSpherical1D {
+  const rec = asRecord(value);
+  return {
+    nugget: requireNumber(rec.nugget),
+    sill: requireNumber(rec.sill),
+    range: requireNumber(rec.range),
+    residuals: requireNumber(rec.residuals),
   };
 }
