@@ -11,8 +11,8 @@
 //!    surface failures as explicit NaN-marked cells (and a non-zero
 //!    count we can detect), never silently return arbitrary values.
 //!
-//! Deferred to v2 polish (per the M11 scoping decision documented in
-//! `docs/m0-findings.md`):
+//! Deferred to v2 polish (M11 scoping decision: ship only the gates
+//! load-bearing for the v1 feasibility question):
 //! - Cross-platform statistical equivalence (no other platforms tested
 //!   yet; the M11 deliverable is single-platform feasibility).
 //! - Realization variance ≈ kriging variance (correctness invariant,
@@ -142,7 +142,7 @@ fn realization_mean_converges_to_ok_prediction() {
     // replaced with normal scores; the kriging math is identical.
     let scored_dataset = {
         let (coords, _) = dataset.into_parts();
-        let scores: Vec<Real> = model.sample_scores().iter().copied().collect();
+        let scores: Vec<Real> = model.sample_scores().to_vec();
         PlanarDataset3D::new(coords, scores).unwrap()
     };
     let ok_model = OrdinaryKrigingModel3D::new(
@@ -226,7 +226,7 @@ fn sgs_produces_no_nan_on_normal_workload() {
 // ---- Deferred gates ---------------------------------------------------
 
 #[test]
-#[ignore = "M11 scoping decision: deferred to v2 polish (see docs/m0-findings.md)"]
+#[ignore = "deferred to v2 polish: statistical-correctness invariant, not load-bearing for v1 feasibility (see module doc)"]
 fn realization_variance_matches_kriging_variance() {
     // The per-cell variance across realizations should equal the
     // kriging variance up to sampling noise. Useful as a deeper
@@ -235,7 +235,7 @@ fn realization_variance_matches_kriging_variance() {
 }
 
 #[test]
-#[ignore = "M11 scoping decision: deferred to v2 polish (see docs/m0-findings.md)"]
+#[ignore = "deferred to v2 polish: statistical-correctness invariant, not load-bearing for v1 feasibility (see module doc)"]
 fn realization_variogram_matches_input_model() {
     // The experimental variogram averaged across realizations should
     // approach the input variogram model. Validates that the SGS

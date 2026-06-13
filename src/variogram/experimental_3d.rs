@@ -148,6 +148,7 @@ fn row_max_distance(n: usize, coords: &[Coord3D], anisotropy: &Anisotropy3D) -> 
 /// pairs `(i, j)` with `i < j`. Each row `i` is independent; per-row
 /// partial accumulators are tree-reduced. Native: rayon. WASM: serial.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 fn accumulate_pairs(
     n: usize,
     coords: &[Coord3D],
@@ -197,6 +198,7 @@ fn accumulate_pairs(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 fn accumulate_pairs(
     n: usize,
     coords: &[Coord3D],

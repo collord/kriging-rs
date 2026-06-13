@@ -70,9 +70,7 @@ impl NormalScoreTransform {
             let avg_rank = ((i + 1) + j) as f64 / 2.0;
             let p = avg_rank / (n as f64 + 1.0);
             let score = inv_standard_normal_cdf(p) as Real;
-            for k in i..j {
-                scores[k] = score;
-            }
+            scores[i..j].fill(score);
             i = j;
         }
 

@@ -198,6 +198,7 @@ pub fn compute_directional_variogram_3d(
 /// Per-row body of the directional accumulation loop. Encapsulated so
 /// the rayon and serial drivers share the inner logic verbatim.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn directional_row_into(
     i: usize,
     n: usize,
@@ -250,6 +251,7 @@ fn directional_row_into(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 fn accumulate_directional_pairs(
     n: usize,
     coords: &[Coord3D],
@@ -288,6 +290,7 @@ fn accumulate_directional_pairs(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 fn accumulate_directional_pairs(
     n: usize,
     coords: &[Coord3D],

@@ -9,9 +9,9 @@
 //! 4. Generate a seeded random path through the grid cells.
 //! 5. For each cell in path order:
 //!    a. Find the `max_neighbors` nearest neighbours in the growing
-//!       conditioning tree.
+//!    conditioning tree.
 //!    b. Build a simple-kriging system (mean = 0 in score space) and
-//!       solve via the M8 robust solver.
+//!    solve via the M8 robust solver.
 //!    c. Draw `u ~ N(0, 1)`; the cell's simulated score is `μ + σ · u`.
 //!    d. Add the simulated cell back into the conditioning tree.
 //! 6. After the full path: back-transform the grid scores through the

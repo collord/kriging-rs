@@ -52,9 +52,14 @@ impl Coord3D {
         }
     }
 
-    /// Componentwise subtraction returning the lag vector `self - other`.
+}
+
+/// Componentwise subtraction returning the lag vector `self - other`.
+impl std::ops::Sub for Coord3D {
+    type Output = Coord3D;
+
     #[inline]
-    pub fn sub(self, other: Coord3D) -> Coord3D {
+    fn sub(self, other: Coord3D) -> Coord3D {
         Coord3D {
             x: self.x - other.x,
             y: self.y - other.y,
@@ -141,7 +146,7 @@ mod tests {
     fn sub_produces_lag_vector() {
         let a = Coord3D::new(5.0, 7.0, 9.0);
         let b = Coord3D::new(2.0, 3.0, 4.0);
-        let lag = a.sub(b);
+        let lag = a - b;
         assert_eq!(lag, Coord3D::new(3.0, 4.0, 5.0));
     }
 }
