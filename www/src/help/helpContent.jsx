@@ -89,32 +89,6 @@ const HELP_TOPICS = {
       </p>
     ),
   },
-  variogramModel: {
-    title: "Variogram model",
-    content: (
-      <>
-        <p>
-          The variogram describes how similarity between points decays with distance. Each family
-          has a characteristic shape:
-        </p>
-        <ul>
-          <li>
-            <strong>Exponential / Spherical</strong> — good general-purpose defaults.
-          </li>
-          <li>
-            <strong>Gaussian</strong> — very smooth fields (can be unstable if data is noisy).
-          </li>
-          <li>
-            <strong>Cubic</strong> — smooth with a finite range.
-          </li>
-          <li>
-            <strong>Stable / Matérn</strong> — a tunable smoothness parameter.
-          </li>
-        </ul>
-        <p>The chosen family’s nugget, sill, and range are fitted to your data.</p>
-      </>
-    ),
-  },
   surfaceLayer: {
     title: "Surface layer",
     content: (

@@ -6,7 +6,8 @@ import {
 } from "kriging-rs-wasm";
 import { generateSurfaceSamples, buildPredictionGrid, resolveBackendMode } from "../lib/sampleData";
 import { renderSurface } from "../lib/canvas";
-import HelpTip, { FieldLabel } from "./HelpTip";
+import HelpTip from "./HelpTip";
+import { VariogramMathHelp } from "../help/variogramMath.jsx";
 
 const CANVAS_W = 360;
 const CANVAS_H = 220;
@@ -144,9 +145,12 @@ export default function CompareView({ onError, webgpuAvailable = false }) {
         }}
       >
         <div className="control-group">
-          <FieldLabel htmlFor="compareLeft" topic="variogramModel">
-            Left model
-          </FieldLabel>
+          <span className="label-row">
+            <label htmlFor="compareLeft">Left model</label>
+            <HelpTip title={`Left model — ${modelLeft}`} label="Left model math">
+              <VariogramMathHelp model={modelLeft} />
+            </HelpTip>
+          </span>
           <select
             id="compareLeft"
             value={modelLeft}
@@ -160,9 +164,12 @@ export default function CompareView({ onError, webgpuAvailable = false }) {
           </select>
         </div>
         <div className="control-group">
-          <FieldLabel htmlFor="compareRight" topic="variogramModel">
-            Right model
-          </FieldLabel>
+          <span className="label-row">
+            <label htmlFor="compareRight">Right model</label>
+            <HelpTip title={`Right model — ${modelRight}`} label="Right model math">
+              <VariogramMathHelp model={modelRight} />
+            </HelpTip>
+          </span>
           <select
             id="compareRight"
             value={modelRight}

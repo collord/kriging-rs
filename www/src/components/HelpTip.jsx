@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import HELP_TOPICS from "../help/helpContent.jsx";
 
-const POPOVER_MAX_WIDTH = 288;
+const POPOVER_MAX_WIDTH = 340;
 const VIEWPORT_MARGIN = 8;
 
 /**

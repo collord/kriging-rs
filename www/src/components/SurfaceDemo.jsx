@@ -15,6 +15,7 @@ import {
 } from "../lib/sampleData";
 import { computeEmpiricalVariogram } from "../lib/variogram";
 import HelpTip, { FieldLabel } from "./HelpTip";
+import { VariogramMathHelp } from "../help/variogramMath.jsx";
 import {
   drawSurfacePlaceholder,
   drawResidualPlaceholder,
@@ -490,9 +491,12 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           />
         </div>
         <div className="control-group">
-          <FieldLabel htmlFor="variogramModel" topic="variogramModel">
-            Variogram model
-          </FieldLabel>
+          <span className="label-row">
+            <label htmlFor="variogramModel">Variogram model</label>
+            <HelpTip title={`Variogram model — ${variogramModel}`} label="Variogram model math">
+              <VariogramMathHelp model={variogramModel} />
+            </HelpTip>
+          </span>
           <select
             id="variogramModel"
             value={variogramModel}
