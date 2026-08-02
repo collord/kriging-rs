@@ -38,6 +38,7 @@
 //! number quality, callers can post-process or wrap this module's scalar outputs.
 
 use crate::Real;
+use crate::cokriging::collocated::{CollocatedCokrigingModel, SecondaryVariable};
 use crate::distance::GeoCoord;
 use crate::error::KrigingError;
 use crate::geo_dataset::GeoDataset;
@@ -581,6 +582,67 @@ pub fn conditional_simulate_many_binomial_projected(
         logit_samples: logit_out,
         prevalence_samples: prev_out,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Collocated cosimulation (Markov Model 1)
+// ---------------------------------------------------------------------------
+
+/// Sequential Gaussian **cosimulation** of a primary variable conditioned on primary data and a
+/// densely sampled secondary variable, under the collocated Markov Model 1 (see
+/// [`CollocatedCokrigingModel`]).
+///
+/// The secondary variable must be known at every target (`target_secondary_values`, same length
+/// and order as `targets`). At each visited target the primary is drawn from `N(ẑ, σ²̂)` where
+/// `ẑ`, `σ²̂` come from collocated cokriging against all already-observed-or-simulated primary
+/// values plus the collocated secondary datum; the sampled value is appended to the primary
+/// conditioning set for subsequent targets. Realizations honor the primary data and reproduce
+/// its covariance while borrowing the secondary's structure.
+///
+/// Returns one primary sample per target in the original input order.
+///
+/// Errors mirror [`conditional_simulate`]: mismatched array lengths, fewer than two conditioning
+/// stations, or an invalid `target_order` permutation; secondary length mismatch is reported via
+/// [`KrigingError::DimensionMismatch`].
+#[allow(clippy::too_many_arguments)]
+pub fn collocated_cosimulate(
+    conditioning_coords: &[GeoCoord],
+    conditioning_values: &[Real],
+    targets: &[GeoCoord],
+    target_secondary_values: &[Real],
+    variogram: VariogramModel,
+    primary_mean: Real,
+    secondary: SecondaryVariable,
+    options: SimulationOptions,
+) -> Result<Vec<Real>, KrigingError> {
+    validate_continuous_inputs(conditioning_coords, conditioning_values)?;
+    if targets.len() != target_secondary_values.len() {
+        return Err(KrigingError::DimensionMismatch(format!(
+            "targets ({}) and target_secondary_values ({}) must have equal length",
+            targets.len(),
+            target_secondary_values.len()
+        )));
+    }
+    let n_targets = targets.len();
+    let order = resolve_target_order(n_targets, options.target_order)?;
+
+    let mut rng = Rng::new(options.seed);
+    let mut all_coords = conditioning_coords.to_vec();
+    let mut all_values = conditioning_values.to_vec();
+    let mut out = vec![0.0 as Real; n_targets];
+
+    for &target_idx in &order {
+        let dataset = GeoDataset::new(all_coords.clone(), all_values.clone())?;
+        let model = CollocatedCokrigingModel::new(dataset, variogram, primary_mean, secondary)?;
+        let pred = model.predict(targets[target_idx], target_secondary_values[target_idx])?;
+        let sigma = pred.variance.max(0.0).sqrt();
+        let sampled = pred.value + sigma * rng.next_standard_normal();
+        out[target_idx] = sampled;
+        all_coords.push(targets[target_idx]);
+        all_values.push(sampled);
+    }
+
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1198,6 +1260,68 @@ mod tests {
         let values = vec![1.0, 2.0, 3.0, 4.0];
         let variogram = VariogramModel::new(0.1, 5.0, 200.0, VariogramType::Exponential).unwrap();
         (coords, values, variogram)
+    }
+
+    // ---- Collocated cosimulation ------------------------------------------
+
+    #[test]
+    fn collocated_cosimulate_is_deterministic_and_uses_secondary() {
+        let (c, v, vg) = setup();
+        let targets = vec![
+            GeoCoord::try_new(0.5, 0.5).unwrap(),
+            GeoCoord::try_new(0.25, 0.75).unwrap(),
+        ];
+        let sec = SecondaryVariable::new(0.0, 3.0, 0.7).unwrap();
+        let secondary_hi = vec![6.0, 6.0];
+        let secondary_lo = vec![-6.0, -6.0];
+        let opts = SimulationOptions::new(42);
+        let a = collocated_cosimulate(&c, &v, &targets, &secondary_hi, vg, 2.5, sec, opts.clone())
+            .unwrap();
+        let b = collocated_cosimulate(&c, &v, &targets, &secondary_hi, vg, 2.5, sec, opts).unwrap();
+        assert_eq!(a, b, "same seed → identical realization");
+        assert_eq!(a.len(), targets.len());
+        for x in &a {
+            assert!(x.is_finite());
+        }
+        // A strongly positive collocated secondary should, on average, lift the realization
+        // above one driven by a strongly negative secondary (same seed).
+        let low = collocated_cosimulate(
+            &c,
+            &v,
+            &targets,
+            &secondary_lo,
+            vg,
+            2.5,
+            sec,
+            SimulationOptions::new(42),
+        )
+        .unwrap();
+        let mean_hi: Real = a.iter().sum::<Real>() / a.len() as Real;
+        let mean_lo: Real = low.iter().sum::<Real>() / low.len() as Real;
+        assert!(
+            mean_hi > mean_lo,
+            "hi secondary {mean_hi} should exceed lo {mean_lo}"
+        );
+    }
+
+    #[test]
+    fn collocated_cosimulate_rejects_mismatched_secondary() {
+        let (c, v, vg) = setup();
+        let targets = vec![GeoCoord::try_new(0.5, 0.5).unwrap(); 2];
+        let sec = SecondaryVariable::new(0.0, 1.0, 0.3).unwrap();
+        assert!(
+            collocated_cosimulate(
+                &c,
+                &v,
+                &targets,
+                &[1.0],
+                vg,
+                2.5,
+                sec,
+                SimulationOptions::new(1)
+            )
+            .is_err()
+        );
     }
 
     // ---- Ordinary ----------------------------------------------------------

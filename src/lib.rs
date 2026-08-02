@@ -62,6 +62,10 @@
 //! - [`kriging`] — Ordinary kriging ([`OrdinaryKrigingModel`], [`Prediction`]) and binomial
 //!   kriging ([`BinomialKrigingModel`], [`BinomialObservation`], etc.) for spatial interpolation
 //!   and prevalence surfaces.
+//! - [`cokriging`] — Multi-variable interpolation/simulation. Collocated cokriging &
+//!   cosimulation (Markov Model 1) via [`CollocatedCokrigingModel`], plus the
+//!   [`Coregionalization`] cross-covariance model and [`MultiVariableDataset`] that the full
+//!   block-cokriging solver will build on.
 //! - [`variogram`] — Empirical variogram ([`compute_empirical_variogram`]), fitting
 //!   ([`fit_variogram`]), and parametric models ([`VariogramModel`], [`VariogramType`]).
 //! - [`spacetime`] — Spatio-temporal kriging (ordinary, simple, universal, binomial) with
@@ -99,6 +103,7 @@ compile_error!(
 
 pub mod aggregate;
 pub mod anisotropy_3d;
+pub mod cokriging;
 pub mod coord_3d;
 pub mod cv;
 pub mod cv_3d;
@@ -128,6 +133,10 @@ pub mod variogram;
 pub mod wasm;
 
 pub use anisotropy_3d::Anisotropy3D;
+pub use cokriging::{
+    CollocatedCokrigingModel, Coregionalization, CoregionalizationStructure, CorrelationBasis,
+    MultiVariableDataset, SecondaryVariable, SillMatrix,
+};
 pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;
 pub use error::KrigingError;

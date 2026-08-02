@@ -69,6 +69,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gaussian simulation surface (geographic, projected, binomial, multi-realization, and
   space-time variants) and surfaced on fitted-variogram results.
 
+- **Cokriging (multi-variable) — first tier + foundations.** New `cokriging` module.
+  `CollocatedCokrigingModel` performs collocated *simple* cokriging under the Markov Model 1
+  screening hypothesis: a sparsely sampled primary is interpolated using a densely sampled
+  secondary known at every target, needing only the primary variogram and a single collocated
+  correlation (`SecondaryVariable`, with `from_paired` to estimate it). The `(n+1)` system
+  reduces via a Schur complement to one solve against the shared primary factorization, so a
+  prediction costs the same as simple kriging. `simulation::collocated_cosimulate` draws
+  conditional realizations of the primary honoring the collocated secondary. Foundations for
+  full block cokriging are in place: `Coregionalization` (a Linear Model of Coregionalization
+  with PSD-validated `SillMatrix` sill matrices over `CorrelationBasis` structures) and the
+  isotopic `MultiVariableDataset`. See `examples/collocated_cokriging.rs`.
+
 ### Fixed
 
 - **Cubic variogram coefficients.** The cubic model used `7x² − 8.5x³ + 3.5x⁵ − 0.5x⁷`, which

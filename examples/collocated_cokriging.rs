@@ -1,0 +1,97 @@
+//! Collocated cokriging & cosimulation (Markov Model 1), plus a peek at the coregionalization
+//! foundation for full cokriging.
+//!
+//! Run with: `cargo run --example collocated_cokriging`
+
+use kriging_rs::cokriging::{
+    Coregionalization, CoregionalizationStructure, CorrelationBasis, SillMatrix,
+};
+use kriging_rs::simulation::{SimulationOptions, collocated_cosimulate};
+use kriging_rs::{
+    CollocatedCokrigingModel, GeoCoord, GeoDataset, SecondaryVariable, VariogramModel,
+    VariogramType,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Sparse primary observations (e.g. ground measurements).
+    let coords = vec![
+        GeoCoord::try_new(37.77, -122.42)?,
+        GeoCoord::try_new(37.78, -122.41)?,
+        GeoCoord::try_new(37.76, -122.40)?,
+        GeoCoord::try_new(37.75, -122.43)?,
+    ];
+    let primary = vec![15.0, 18.0, 14.0, 13.0];
+
+    // A secondary covariate (e.g. a remotely sensed field) known everywhere. Here we estimate
+    // its moments and its collocated correlation with the primary from paired samples.
+    let secondary_at_data = vec![2.2, 2.7, 2.1, 1.6];
+    let secondary = SecondaryVariable::from_paired(&primary, &secondary_at_data)?;
+    println!(
+        "secondary: mean={:.3}, std={:.3}, corr={:.3}",
+        secondary.mean(),
+        secondary.std_dev(),
+        secondary.correlation()
+    );
+
+    let variogram = VariogramModel::new(0.1, 6.0, 5.0, VariogramType::Exponential)?;
+    let primary_mean = 15.0;
+
+    // --- Collocated cokriging: predict the primary using the collocated secondary datum. ---
+    let model = CollocatedCokrigingModel::new(
+        GeoDataset::new(coords.clone(), primary.clone())?,
+        variogram,
+        primary_mean,
+        secondary,
+    )?;
+    let target = GeoCoord::try_new(37.765, -122.415)?;
+    let secondary_at_target = 2.4;
+    let pred = model.predict(target, secondary_at_target)?;
+    println!(
+        "cokriging prediction: value={:.3}, variance={:.6}",
+        pred.value, pred.variance
+    );
+
+    // --- Collocated cosimulation: one conditional realization on a small target set. ---
+    let targets = vec![
+        GeoCoord::try_new(37.765, -122.415)?,
+        GeoCoord::try_new(37.775, -122.405)?,
+    ];
+    let target_secondary = vec![2.4, 2.7];
+    let realization = collocated_cosimulate(
+        &coords,
+        &primary,
+        &targets,
+        &target_secondary,
+        variogram,
+        primary_mean,
+        secondary,
+        SimulationOptions::new(42),
+    )?;
+    println!("cosimulated primary at targets: {realization:?}");
+
+    // --- Foundation for full cokriging: a 2-variable Linear Model of Coregionalization. ---
+    // Nugget + exponential structure, each with a positive-semidefinite 2x2 sill matrix.
+    let lmc = Coregionalization::new(vec![
+        CoregionalizationStructure::new(
+            CorrelationBasis::Nugget,
+            SillMatrix::from_rows(vec![vec![0.5, 0.0], vec![0.0, 0.5]])?,
+        ),
+        CoregionalizationStructure::new(
+            CorrelationBasis::Model(VariogramModel::new(
+                0.0,
+                1.0,
+                5.0,
+                VariogramType::Exponential,
+            )?),
+            SillMatrix::from_rows(vec![vec![4.0, 1.5], vec![1.5, 3.0]])?,
+        ),
+    ])?;
+    println!(
+        "LMC: {} variables, {} structures; C_01(0)={:.3}",
+        lmc.n_variables(),
+        lmc.n_structures(),
+        lmc.cross_sill(0, 1),
+    );
+
+    Ok(())
+}
