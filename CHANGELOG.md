@@ -89,8 +89,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Multivariate sequential cosimulation.** `simulation::cosimulate` draws joint conditional
     realizations of all variables honoring the full LMC, simulating each variable at each node
     from its cokriging distribution against the data and everything simulated so far.
+  - **LMC fitting.** `compute_empirical_cross_variogram` estimates the auto/cross-variograms of
+    an isotopic `MultiVariableDataset`; `fit_lmc` chooses the coregionalization's sill matrices
+    to match them by the Goulard–Voltz algorithm (cyclic weighted least squares + a
+    positive-semidefinite projection each sweep), so the fitted model is admissible by
+    construction. You pick the basic structures (ranges); it fits their sills.
 
-  LMC auto-fitting is not yet included (supply the coregionalization directly).
   See `examples/collocated_cokriging.rs`.
 
 ### Fixed

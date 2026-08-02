@@ -5,13 +5,15 @@
 
 use kriging_rs::cokriging::{
     CokrigingKind, CokrigingModel, Coregionalization, CoregionalizationStructure, CorrelationBasis,
-    MultiVariableDataset, MultiVariableSamples, SillMatrix,
+    LmcFitOptions, MultiVariableDataset, MultiVariableSamples, SillMatrix,
+    compute_empirical_cross_variogram, fit_lmc,
 };
 use kriging_rs::simulation::{SimulationOptions, collocated_cosimulate, cosimulate};
 use kriging_rs::{
-    CollocatedCokrigingModel, GeoCoord, GeoDataset, SecondaryVariable, VariogramModel,
-    VariogramType,
+    CollocatedCokrigingModel, EmpiricalEstimator, GeoCoord, GeoDataset, SecondaryVariable,
+    VariogramConfig, VariogramModel, VariogramType,
 };
+use std::num::NonZeroUsize;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Sparse primary observations (e.g. ground measurements).
@@ -151,6 +153,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "cosimulated primary:   {:?}\ncosimulated secondary: {:?}",
         cosim.samples[0], cosim.samples[1]
+    );
+
+    // --- Fit an LMC from data (Goulard–Voltz) instead of hand-building the sills. ---
+    let fit_coords = vec![
+        GeoCoord::try_new(37.70, -122.45)?,
+        GeoCoord::try_new(37.71, -122.44)?,
+        GeoCoord::try_new(37.72, -122.46)?,
+        GeoCoord::try_new(37.73, -122.43)?,
+        GeoCoord::try_new(37.74, -122.45)?,
+        GeoCoord::try_new(37.75, -122.42)?,
+        GeoCoord::try_new(37.76, -122.44)?,
+        GeoCoord::try_new(37.77, -122.46)?,
+    ];
+    let var_a = vec![12.0, 13.5, 11.0, 14.0, 12.5, 10.5, 13.0, 11.5];
+    let var_b = vec![3.0, 3.6, 2.7, 3.9, 3.2, 2.5, 3.4, 2.9]; // correlated with var_a
+    let fit_ds = MultiVariableDataset::new(fit_coords, vec![var_a, var_b])?;
+    let config = VariogramConfig {
+        max_distance: None,
+        n_bins: NonZeroUsize::new(5).unwrap(),
+        estimator: EmpiricalEstimator::Classical,
+    };
+    let cross = compute_empirical_cross_variogram(&fit_ds, &config)?;
+    let fitted = fit_lmc(
+        &cross,
+        vec![
+            CorrelationBasis::Nugget,
+            CorrelationBasis::Model(VariogramModel::new(
+                0.0,
+                1.0,
+                3.0,
+                VariogramType::Exponential,
+            )?),
+        ],
+        LmcFitOptions::default(),
+    )?;
+    println!(
+        "fitted LMC: residual={:.4}, iterations={}, C_00(0)={:.3}, C_01(0)={:.3}",
+        fitted.residual,
+        fitted.iterations,
+        fitted.coregionalization.cross_sill(0, 0),
+        fitted.coregionalization.cross_sill(0, 1),
     );
 
     Ok(())

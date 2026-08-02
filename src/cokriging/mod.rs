@@ -31,14 +31,16 @@
 //!   distribution against the data and everything simulated so far (heterotopic during a node's
 //!   sweep, which is why it builds on [`CokrigingModel::new_heterotopic`]).
 //!
-//! ## Not yet
-//!
-//! - **LMC auto-fitting** (e.g. Goulard–Voltz) — for now, supply the [`Coregionalization`]
-//!   directly; its sill matrices are admissibility-checked at construction.
+//! - **LMC fitting.** [`fit_lmc`] chooses a coregionalization's sill matrices to match empirical
+//!   cross-variograms ([`compute_empirical_cross_variogram`]) by the Goulard–Voltz algorithm —
+//!   a cyclic weighted least-squares update with a positive-semidefinite projection each sweep,
+//!   so the result is admissible by construction. You choose the basic structures (ranges); it
+//!   fits their sills.
 
 pub mod collocated;
 pub mod coregionalization;
 pub mod dataset;
+pub mod fitting;
 pub mod model;
 
 pub use collocated::{CollocatedCokrigingModel, SecondaryVariable};
@@ -46,4 +48,7 @@ pub use coregionalization::{
     Coregionalization, CoregionalizationStructure, CorrelationBasis, SillMatrix,
 };
 pub use dataset::{MultiVariableDataset, MultiVariableSamples};
+pub use fitting::{
+    EmpiricalCrossVariogram, LmcFit, LmcFitOptions, compute_empirical_cross_variogram, fit_lmc,
+};
 pub use model::{CokrigingKind, CokrigingModel};
