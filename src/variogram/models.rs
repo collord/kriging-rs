@@ -103,6 +103,10 @@ fn conf_hypergeom_u(a: f64, b: f64, z: f64) -> f64 {
 /// `ρ(0) = 1`, and as `α → ∞` the CH family converges to Matérn; unlike Matérn it has
 /// polynomial (long-range) tails. Like [`matern_semivariance`], inputs are promoted to
 /// `f64` because `puruspe` is `f64`-only, and the correlation is clamped to `[0, 1]`.
+///
+/// Reference: Ma, P. & Bhadra, A. (2023), "Beyond Matérn: On a Class of Interpretable
+/// Confluent Hypergeometric Covariance Functions", Journal of the American Statistical
+/// Association 118(543):2045–2058. <https://doi.org/10.1080/01621459.2022.2027775>
 #[allow(clippy::unnecessary_cast)]
 fn confluent_hypergeometric_semivariance(
     d: Real,
@@ -151,6 +155,8 @@ pub enum VariogramType {
     HoleEffect,
     /// Confluent hypergeometric family; requires smoothness `nu > 0` and tail-decay `alpha > 0`.
     /// Generalizes Matérn (recovered as `alpha → ∞`) but with polynomial long-range tails.
+    /// See Ma & Bhadra (2023), JASA 118(543):2045–2058,
+    /// <https://doi.org/10.1080/01621459.2022.2027775>.
     ConfluentHypergeometric,
 }
 
@@ -577,7 +583,9 @@ impl VariogramModel {
                     sill
                 } else {
                     let x = d / r;
-                    let poly = 7.0 * x * x - 8.5 * x.powi(3) + 3.5 * x.powi(5) - 0.5 * x.powi(7);
+                    // Standard cubic model (Chilès & Delfiner 2012): the polynomial equals 1
+                    // exactly at x = 1, so γ meets the sill continuously at the range.
+                    let poly = 7.0 * x * x - 8.75 * x.powi(3) + 3.5 * x.powi(5) - 0.75 * x.powi(7);
                     nugget + partial_sill * poly
                 }
             }
@@ -657,6 +665,34 @@ mod tests {
         let model = VariogramModel::new(0.1, 1.0, 10.0, VariogramType::Cubic).unwrap();
         assert_relative_eq!(model.semivariance(10.0), 1.0, epsilon = 1e-5);
         assert_relative_eq!(model.semivariance(20.0), 1.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn cubic_is_monotone_and_reaches_sill_continuously() {
+        // Regression: the standard cubic polynomial equals 1 at x = 1, so the interior branch
+        // must approach the sill from below (never overshoot) and join it continuously at the
+        // range. A prior coefficient bug (−8.5/−0.5) reached ≈1.5·partial_sill just inside the
+        // range.
+        let nugget = 0.1;
+        let sill = 1.0;
+        let range = 10.0;
+        let model = VariogramModel::new(nugget, sill, range, VariogramType::Cubic).unwrap();
+        let mut prev = model.semivariance(0.0);
+        for i in 0..=100 {
+            let d = range * (i as Real) / 100.0;
+            let g = model.semivariance(d);
+            assert!(
+                g >= prev - 1e-6,
+                "cubic must be non-decreasing (d={d}, g={g}, prev={prev})"
+            );
+            assert!(
+                g <= sill + 1e-6,
+                "cubic must never exceed the sill (d={d}, g={g})"
+            );
+            prev = g;
+        }
+        // Continuity: just inside the range should be very close to the sill.
+        assert_relative_eq!(model.semivariance(range * 0.999), sill, epsilon = 5e-3);
     }
 
     #[test]

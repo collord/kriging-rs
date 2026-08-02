@@ -101,7 +101,8 @@ export function variogramSemivariance(distance, modelType, nugget, sill, range, 
   if (modelType === "cubic") {
     if (h >= r) return sill;
     const x = h / r;
-    const poly = 7 * x * x - 8.5 * x * x * x + 3.5 * Math.pow(x, 5) - 0.5 * Math.pow(x, 7);
+    // Standard cubic model: reaches 1 exactly at x = 1 (Chilès & Delfiner 2012).
+    const poly = 7 * x * x - 8.75 * x * x * x + 3.5 * Math.pow(x, 5) - 0.75 * Math.pow(x, 7);
     return nugget + partial * poly;
   }
   if (modelType === "stable") {

@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polynomial (long-range) tails; it converges to Matérn as `alpha → ∞`. The correlation uses
   the confluent hypergeometric function of the second kind `U(a, b, z)`, evaluated by
   double-exponential quadrature in log space (no new dependency; stable for large `alpha`).
+  Reference: Ma & Bhadra (2023), *Beyond Matérn: On a Class of Interpretable Confluent
+  Hypergeometric Covariance Functions*, JASA 118(543):2045–2058,
+  <https://doi.org/10.1080/01621459.2022.2027775>.
 - **Two-shape constructor** `VariogramModel::new_with_shapes(nugget, sill, range, type, shape1,
   shape2)` and accessor `VariogramModel::shape2()`. `new_with_shape` now delegates to it, and
   `fit_variogram` sweeps a small `(nu, alpha)` grid for the CH family.
@@ -65,6 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shape parameter (`shape2`, the CH tail-decay `alpha`) are threaded through the sequential
   Gaussian simulation surface (geographic, projected, binomial, multi-realization, and
   space-time variants) and surfaced on fitted-variogram results.
+
+### Fixed
+
+- **Cubic variogram coefficients.** The cubic model used `7x² − 8.5x³ + 3.5x⁵ − 0.5x⁷`, which
+  overshoots the sill near the range (reaching ≈1.5·partial_sill just inside it) and is not
+  monotone. Corrected to the standard `7x² − 8.75x³ + 3.5x⁵ − 0.75x⁷` (Chilès & Delfiner 2012),
+  which meets the sill continuously at the range. Fixed in the engine and the `www` demo.
 
 ## [0.4.0] - 2026-04-26
 
