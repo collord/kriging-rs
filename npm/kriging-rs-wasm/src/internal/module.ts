@@ -118,6 +118,7 @@ const VariogramTypeNameToKey: Record<
   matern: "Matern",
   power: "Power",
   holeeffect: "HoleEffect",
+  confluenthypergeometric: "ConfluentHypergeometric",
 };
 
 /**

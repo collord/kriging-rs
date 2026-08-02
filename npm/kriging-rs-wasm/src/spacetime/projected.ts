@@ -58,11 +58,13 @@ export class SpaceTimeProjectedOrdinaryKriging {
         packed.spatialSill,
         packed.spatialRange,
         packed.spatialShape,
+        packed.spatialShape2,
         packed.temporalType,
         packed.temporalNugget,
         packed.temporalSill,
         packed.temporalRange,
         packed.temporalShape,
+        packed.temporalShape2,
         packed.k1,
         packed.k2,
         packed.k3

@@ -25,11 +25,13 @@ export interface SpaceTimeVariogramArgs {
   spatialSill: number;
   spatialRange: number;
   spatialShape: number | undefined;
+  spatialShape2: number | undefined;
   temporalType: string;
   temporalNugget: number;
   temporalSill: number;
   temporalRange: number;
   temporalShape: number | undefined;
+  temporalShape2: number | undefined;
   k1: number | undefined;
   k2: number | undefined;
   k3: number | undefined;
@@ -45,11 +47,13 @@ export function packSpaceTimeVariogram(
     spatialSill: variogram.spatial.sill,
     spatialRange: variogram.spatial.range,
     spatialShape: variogram.spatial.shape,
+    spatialShape2: variogram.spatial.shape2,
     temporalType: variogram.temporal.variogramType,
     temporalNugget: variogram.temporal.nugget,
     temporalSill: variogram.temporal.sill,
     temporalRange: variogram.temporal.range,
     temporalShape: variogram.temporal.shape,
+    temporalShape2: variogram.temporal.shape2,
   };
   if (variogram.family === "productSum") {
     return {

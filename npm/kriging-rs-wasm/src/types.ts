@@ -16,7 +16,8 @@ export type VariogramTypeName =
   | "stable"
   | "matern"
   | "power"
-  | "holeeffect";
+  | "holeeffect"
+  | "confluenthypergeometric";
 
 /**
  * Empirical variogram estimator choice.
@@ -605,8 +606,10 @@ export interface FittedVariogram {
   nugget: number;
   sill: number;
   range: number;
-  /** Shape parameter (alpha for stable, nu for matern); present only for stable/matern. */
+  /** Shape parameter (alpha for stable, nu for matern/confluent-hypergeometric); present only for shaped models. */
   shape?: number;
+  /** Second shape parameter (tail-decay `alpha` for confluent-hypergeometric); present only for that model. */
+  shape2?: number;
   residuals: number;
 }
 
@@ -639,8 +642,10 @@ export interface VariogramParams {
   nugget: number;
   sill: number;
   range: number;
-  /** Shape parameter for stable/matern; omit for other types. */
+  /** Shape parameter for stable/matern/confluent-hypergeometric (nu); omit for other types. */
   shape?: number;
+  /** Second shape parameter for confluent-hypergeometric (tail-decay `alpha`); omit for other types. */
+  shape2?: number;
 }
 
 /**

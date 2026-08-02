@@ -88,6 +88,13 @@ export function fitVariogram(options: FitVariogramOptions): FittedVariogram {
   ) {
     fitted.shape = result.shape;
   }
+  if (
+    result.shape2 !== undefined &&
+    typeof result.shape2 === "number" &&
+    Number.isFinite(result.shape2)
+  ) {
+    fitted.shape2 = result.shape2;
+  }
   return fitted;
 }
 

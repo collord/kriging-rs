@@ -2,7 +2,9 @@
 //!
 //! Compute an empirical variogram with [`compute_empirical_variogram`], fit a parametric model
 //! with [`fit_variogram`], and build a [`VariogramModel`] (see [`VariogramType`]) for use with
-//! kriging. Supported model types include spherical, exponential, Gaussian, cubic, stable, and Matérn.
+//! kriging. Supported model types include spherical, exponential, Gaussian, cubic, stable, Matérn,
+//! power, hole-effect, and confluent hypergeometric (a two-shape Matérn generalization with
+//! polynomial tails).
 
 pub mod directional_3d;
 pub mod empirical;

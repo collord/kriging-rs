@@ -64,6 +64,7 @@ pub enum WasmVariogramType {
     Matern,
     Power,
     HoleEffect,
+    ConfluentHypergeometric,
 }
 
 impl From<WasmVariogramType> for VariogramType {
@@ -77,6 +78,7 @@ impl From<WasmVariogramType> for VariogramType {
             WasmVariogramType::Matern => VariogramType::Matern,
             WasmVariogramType::Power => VariogramType::Power,
             WasmVariogramType::HoleEffect => VariogramType::HoleEffect,
+            WasmVariogramType::ConfluentHypergeometric => VariogramType::ConfluentHypergeometric,
         }
     }
 }
@@ -88,6 +90,21 @@ pub(super) fn parse_variogram(
     range: f64,
     shape: Option<f64>,
 ) -> Result<VariogramModel, JsValue> {
+    parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, None)
+}
+
+/// Like [`parse_variogram`] but accepting a second shape parameter for two-shape families.
+///
+/// `shape` is the primary shape (Stable: alpha; Matérn/CH: nu; Power: exponent). `shape2` is
+/// only consulted by the Confluent Hypergeometric family, where it is the tail-decay `alpha`.
+pub(super) fn parse_variogram_with_shape2(
+    variogram_type: &str,
+    nugget: f64,
+    sill: f64,
+    range: f64,
+    shape: Option<f64>,
+    shape2: Option<f64>,
+) -> Result<VariogramModel, JsValue> {
     let vt = match variogram_type.to_ascii_lowercase().as_str() {
         "spherical" => VariogramType::Spherical,
         "exponential" => VariogramType::Exponential,
@@ -97,9 +114,22 @@ pub(super) fn parse_variogram(
         "matern" => VariogramType::Matern,
         "power" => VariogramType::Power,
         "holeeffect" | "hole_effect" | "hole-effect" => VariogramType::HoleEffect,
+        "confluenthypergeometric"
+        | "confluent_hypergeometric"
+        | "confluent-hypergeometric"
+        | "ch" => VariogramType::ConfluentHypergeometric,
         _ => return Err(coded_err("unknown variogram_type", "unknown_variogram")),
     };
     match (vt, shape) {
+        (VariogramType::ConfluentHypergeometric, Some(s)) => VariogramModel::new_with_shapes(
+            nugget as Real,
+            sill as Real,
+            range as Real,
+            vt,
+            s as Real,
+            shape2.map(|a| a as Real),
+        )
+        .map_err(kriging_err_to_js),
         (VariogramType::Stable, Some(s))
         | (VariogramType::Matern, Some(s))
         | (VariogramType::Power, Some(s)) => VariogramModel::new_with_shape(
@@ -249,6 +279,8 @@ struct JsFittedVariogram {
     range: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     shape: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shape2: Option<f64>,
     residuals: f64,
 }
 
@@ -271,6 +303,7 @@ fn variogram_type_name(variogram_type: VariogramType) -> &'static str {
         VariogramType::Matern => "matern",
         VariogramType::Power => "power",
         VariogramType::HoleEffect => "holeeffect",
+        VariogramType::ConfluentHypergeometric => "confluenthypergeometric",
     }
 }
 
@@ -355,6 +388,10 @@ struct VariogramParams {
     range: f64,
     #[serde(default)]
     shape: Option<f64>,
+    /// Second shape parameter, consulted only by two-shape families (Confluent
+    /// Hypergeometric tail-decay `alpha`). Ignored for all other model types.
+    #[serde(default)]
+    shape2: Option<f64>,
 }
 
 /// Options for binomial kriging model construction (JS: single object argument).
@@ -400,12 +437,13 @@ impl WasmOrdinaryKriging {
         let opts: OrdinaryKrigingOptions =
             serde_wasm_bindgen::from_value(options).map_err(err_to_js)?;
         let coords = to_coords(&opts.lats, &opts.lons)?;
-        let model = parse_variogram(
+        let model = parse_variogram_with_shape2(
             &opts.variogram.variogram_type,
             opts.variogram.nugget,
             opts.variogram.sill,
             opts.variogram.range,
             opts.variogram.shape,
+            opts.variogram.shape2,
         )?;
         let values_real = opts.values.iter().map(|v| *v as Real).collect::<Vec<_>>();
         let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
@@ -611,12 +649,13 @@ impl WasmBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram(
+        let model = parse_variogram_with_shape2(
             &opts.variogram.variogram_type,
             opts.variogram.nugget,
             opts.variogram.sill,
             opts.variogram.range,
             opts.variogram.shape,
+            opts.variogram.shape2,
         )?;
         let hcfg = HeteroskedasticBinomialConfig::default();
         let fit = BinomialKrigingModel::new_with_config(
@@ -713,12 +752,13 @@ impl WasmBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram(
+        let model = parse_variogram_with_shape2(
             &opts.variogram.variogram_type,
             opts.variogram.nugget,
             opts.variogram.sill,
             opts.variogram.range,
             opts.variogram.shape,
+            opts.variogram.shape2,
         )?;
         let prior = BinomialPrior::new(opts.prior.alpha as Real, opts.prior.beta as Real)
             .map_err(kriging_err_to_js)?;
@@ -923,6 +963,7 @@ pub fn wasm_fit_ordinary_variogram(
         sill: sill as f64,
         range: range as f64,
         shape: fit.model.shape().map(|s| s as f64),
+        shape2: fit.model.shape2().map(|s| s as f64),
         residuals: fit.residuals as f64,
     })
     .map_err(err_to_js)
@@ -2177,6 +2218,7 @@ pub fn wasm_conditional_simulate(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2192,7 +2234,7 @@ pub fn wasm_conditional_simulate(
         .map(|v| *v as Real)
         .collect::<Vec<_>>();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let options = SimulationOptions {
         seed,
         target_order: target_order.map(|v| v.into_iter().map(|x| x as usize).collect()),
@@ -2228,6 +2270,7 @@ pub fn wasm_conditional_simulate_simple(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2240,7 +2283,7 @@ pub fn wasm_conditional_simulate_simple(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = conditional_simulate_simple(
         &cond_coords,
@@ -2271,6 +2314,7 @@ pub fn wasm_conditional_simulate_universal(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2283,7 +2327,7 @@ pub fn wasm_conditional_simulate_universal(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let trend_enum = parse_trend(trend)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = conditional_simulate_universal(
@@ -2316,6 +2360,7 @@ pub fn wasm_conditional_simulate_projected(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2344,7 +2389,7 @@ pub fn wasm_conditional_simulate_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let options = parse_simulation_options(seed, target_order);
@@ -2400,6 +2445,7 @@ pub fn wasm_conditional_simulate_binomial(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     seed: u64,
@@ -2416,7 +2462,7 @@ pub fn wasm_conditional_simulate_binomial(
     }
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let options = parse_simulation_options(seed, target_order);
     let result = conditional_simulate_binomial(
@@ -2481,6 +2527,7 @@ pub fn wasm_conditional_simulate_many(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     n_realizations: u32,
     base_seed: u64,
     target_order: Option<Vec<u32>>,
@@ -2494,7 +2541,7 @@ pub fn wasm_conditional_simulate_many(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let samples = conditional_simulate_many(
         &cond_coords,
@@ -2528,6 +2575,7 @@ pub fn wasm_conditional_simulate_many_binomial(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     n_realizations: u32,
@@ -2545,7 +2593,7 @@ pub fn wasm_conditional_simulate_many_binomial(
     }
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let result = conditional_simulate_many_binomial(
@@ -2583,6 +2631,7 @@ pub fn wasm_conditional_simulate_binomial_projected(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     seed: u64,
@@ -2613,7 +2662,7 @@ pub fn wasm_conditional_simulate_binomial_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
@@ -2651,6 +2700,7 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
     sill: f64,
     range: f64,
     shape: Option<f64>,
+    shape2: Option<f64>,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     n_realizations: u32,
@@ -2682,7 +2732,7 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;

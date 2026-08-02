@@ -50,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fitSpherical3D*`. Mirrors upstream's 2-D WASM API shape.
 - Native perf benchmark: `examples/sgs_oilsands_bench.rs`.
 
+### Added — variogram forms & cokriging
+
+- **Confluent Hypergeometric variogram kernel.** New `VariogramType::ConfluentHypergeometric`
+  / `VariogramModel::ConfluentHypergeometric { nugget, sill, range, nu, alpha }`, a two-shape
+  family with Matérn-like smoothness `nu > 0` and a separate tail-decay `alpha > 0` giving
+  polynomial (long-range) tails; it converges to Matérn as `alpha → ∞`. The correlation uses
+  the confluent hypergeometric function of the second kind `U(a, b, z)`, evaluated by
+  double-exponential quadrature in log space (no new dependency; stable for large `alpha`).
+- **Two-shape constructor** `VariogramModel::new_with_shapes(nugget, sill, range, type, shape1,
+  shape2)` and accessor `VariogramModel::shape2()`. `new_with_shape` now delegates to it, and
+  `fit_variogram` sweeps a small `(nu, alpha)` grid for the CH family.
+- **WASM / TypeScript:** the `"confluenthypergeometric"` variogram type and an optional second
+  shape parameter (`shape2`, the CH tail-decay `alpha`) are threaded through the sequential
+  Gaussian simulation surface (geographic, projected, binomial, multi-realization, and
+  space-time variants) and surfaced on fitted-variogram results.
+
 ## [0.4.0] - 2026-04-26
 
 ### Added

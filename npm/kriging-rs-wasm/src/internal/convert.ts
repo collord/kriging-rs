@@ -76,7 +76,8 @@ export function requireVariogramType(value: unknown): VariogramTypeName {
     value === "stable" ||
     value === "matern" ||
     value === "power" ||
-    value === "holeeffect"
+    value === "holeeffect" ||
+    value === "confluenthypergeometric"
   ) {
     return value;
   }

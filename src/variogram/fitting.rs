@@ -14,13 +14,14 @@ fn model_from_params(
     sill: Real,
     range: Real,
     model_type: VariogramType,
-    shape: Option<Real>,
+    shape1: Option<Real>,
+    shape2: Option<Real>,
 ) -> VariogramModel {
-    match shape {
+    match shape1 {
         None => VariogramModel::new(nugget, sill, range, model_type)
             .expect("grid ensures nugget >= 0, sill > nugget, range > 0"),
-        Some(s) => VariogramModel::new_with_shape(nugget, sill, range, model_type, s)
-            .expect("grid ensures valid shape for Stable/Matérn"),
+        Some(s) => VariogramModel::new_with_shapes(nugget, sill, range, model_type, s, shape2)
+            .expect("grid ensures valid shapes for Stable/Matérn/CH"),
     }
 }
 
@@ -61,12 +62,34 @@ pub fn fit_variogram(
         .max(Real::EPSILON);
     let nugget_guess = empirical.semivariances[0].min(sill_guess * 0.5).max(0.0);
 
-    let shape_values: Option<&[Real]> = match model_type {
-        VariogramType::Stable => Some(&[0.5, 1.0, 1.5, 2.0]),
-        VariogramType::Matern => Some(&[0.5, 1.0, 2.0, 3.0]),
+    // Shape grid as `(shape1, shape2)` pairs. Single-shape families vary `shape1` only; the
+    // Confluent Hypergeometric family sweeps a small 2-D grid of (nu, alpha). Two shapes are
+    // weakly identified from a noisy empirical curve, so this is a sensible default rather than
+    // a high-precision joint fit.
+    let shape_grid: Vec<(Option<Real>, Option<Real>)> = match model_type {
+        VariogramType::Stable => [0.5, 1.0, 1.5, 2.0]
+            .iter()
+            .map(|&s| (Some(s), None))
+            .collect(),
+        VariogramType::Matern => [0.5, 1.0, 2.0, 3.0]
+            .iter()
+            .map(|&s| (Some(s), None))
+            .collect(),
         // Power exponent must lie in (0, 2); sample plausible values (avoiding the endpoints).
-        VariogramType::Power => Some(&[0.5, 1.0, 1.5, 1.9]),
-        _ => None,
+        VariogramType::Power => [0.5, 1.0, 1.5, 1.9]
+            .iter()
+            .map(|&s| (Some(s), None))
+            .collect(),
+        VariogramType::ConfluentHypergeometric => {
+            let mut grid = Vec::new();
+            for &nu in &[0.5 as Real, 1.0, 1.5] {
+                for &alpha in &[0.5 as Real, 1.0, 2.0] {
+                    grid.push((Some(nu), Some(alpha)));
+                }
+            }
+            grid
+        }
+        _ => vec![(None, None)],
     };
 
     let mut best = None::<FitResult>;
@@ -76,12 +99,8 @@ pub fn fit_variogram(
                 let nugget = (nugget_guess * (1.0 + nugget_frac)).min(sill_guess * sill_scale);
                 let sill = (sill_guess * sill_scale).max(nugget + 1e-9);
                 let range = (range_guess * range_scale).max(1e-9);
-                let shapes: Vec<Option<Real>> = match shape_values {
-                    None => vec![None],
-                    Some(slices) => slices.iter().copied().map(Some).collect(),
-                };
-                for shape in shapes {
-                    let model = model_from_params(nugget, sill, range, model_type, shape);
+                for &(shape1, shape2) in &shape_grid {
+                    let model = model_from_params(nugget, sill, range, model_type, shape1, shape2);
                     let residuals = weighted_residuals(empirical, model);
                     let candidate = FitResult { model, residuals };
                     best = Some(match best {
@@ -109,6 +128,7 @@ fn refine_nelder_mead(
     start: FitResult,
 ) -> FitResult {
     let shape = start.model.shape();
+    let shape2 = start.model.shape2();
     let (n0, s0, r0) = start.model.params();
     let build = |p: [Real; 3]| -> Option<VariogramModel> {
         let (nugget, sill, range) = (p[0], p[1], p[2]);
@@ -121,7 +141,9 @@ fn refine_nelder_mead(
         match model_type {
             VariogramType::Power => VariogramModel::new_power(nugget, sill, range).ok(),
             _ => match shape {
-                Some(s) => VariogramModel::new_with_shape(nugget, sill, range, model_type, s).ok(),
+                Some(s) => {
+                    VariogramModel::new_with_shapes(nugget, sill, range, model_type, s, shape2).ok()
+                }
                 None => VariogramModel::new(nugget, sill, range, model_type).ok(),
             },
         }
@@ -1350,5 +1372,28 @@ mod tests {
         assert!(fit_spherical_3d_joint(&empty, &nonempty, &nonempty).is_err());
         assert!(fit_spherical_3d_joint(&nonempty, &empty, &nonempty).is_err());
         assert!(fit_spherical_3d_joint(&nonempty, &nonempty, &empty).is_err());
+    }
+
+    #[test]
+    fn fit_confluent_hypergeometric_returns_valid_two_shape_model() {
+        let empirical = EmpiricalVariogram {
+            distances: vec![10.0, 20.0, 30.0, 40.0],
+            semivariances: vec![0.2, 0.4, 0.6, 0.75],
+            n_pairs: vec![8, 9, 7, 6],
+        };
+        let fit = fit_variogram(&empirical, VariogramType::ConfluentHypergeometric)
+            .expect("fit should work");
+        assert!(fit.residuals.is_finite());
+        let (nugget, sill, range) = fit.model.params();
+        assert!(nugget >= 0.0 && sill > nugget && range > 0.0);
+        // Both shape parameters must be present, finite, and positive.
+        let nu = fit.model.shape().expect("CH must expose nu");
+        let alpha = fit.model.shape2().expect("CH must expose alpha");
+        assert!(nu.is_finite() && nu > 0.0);
+        assert!(alpha.is_finite() && alpha > 0.0);
+        assert_eq!(
+            fit.model.variogram_type(),
+            VariogramType::ConfluentHypergeometric
+        );
     }
 }

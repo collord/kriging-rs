@@ -1617,6 +1617,63 @@ describe("Conditional simulation", () => {
       }),
     ).toThrow(KrigingError);
   });
+
+  test("conditionalSimulate accepts the confluent-hypergeometric kernel with two shapes", () => {
+    // nu = shape (smoothness), alpha = shape2 (tail decay).
+    const chVariogram = {
+      variogramType: "confluenthypergeometric" as VariogramTypeName,
+      nugget: 0.05,
+      sill: 1.0,
+      range: 500,
+      shape: 1.5,
+      shape2: 2.0,
+    };
+    const a = conditionalSimulate({
+      conditioningLats: condLats,
+      conditioningLons: condLons,
+      conditioningValues: condValues,
+      targetLats,
+      targetLons,
+      variogram: chVariogram,
+      seed: 99,
+    });
+    const b = conditionalSimulate({
+      conditioningLats: condLats,
+      conditioningLons: condLons,
+      conditioningValues: condValues,
+      targetLats,
+      targetLons,
+      variogram: chVariogram,
+      seed: 99,
+    });
+    expect(a.length).toBe(targetLats.length);
+    // Every sample is finite, and the run is reproducible under a fixed seed.
+    expect(Array.from(a).every((v) => Number.isFinite(v))).toBe(true);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  test("confluent-hypergeometric defaults the tail-decay (alpha) when shape2 is omitted", () => {
+    // Providing only `shape` (nu) is valid; `alpha` defaults, mirroring how stable/matern
+    // default their shape. The run must still produce finite, reproducible samples.
+    const opts = {
+      conditioningLats: condLats,
+      conditioningLons: condLons,
+      conditioningValues: condValues,
+      targetLats,
+      targetLons,
+      variogram: {
+        variogramType: "confluenthypergeometric" as VariogramTypeName,
+        nugget: 0.05,
+        sill: 1.0,
+        range: 500,
+        shape: 1.0,
+      },
+      seed: 3,
+    };
+    const out = conditionalSimulate(opts);
+    expect(out.length).toBe(targetLats.length);
+    expect(Array.from(out).every((v) => Number.isFinite(v))).toBe(true);
+  });
 });
 
 describe("Conditional simulation (per-variant)", () => {

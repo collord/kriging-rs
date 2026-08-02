@@ -294,6 +294,9 @@ function mapVariogramParams(value: unknown): VariogramParams {
   if (typeof rec.shape === "number" && Number.isFinite(rec.shape)) {
     out.shape = rec.shape;
   }
+  if (typeof rec.shape2 === "number" && Number.isFinite(rec.shape2)) {
+    out.shape2 = rec.shape2;
+  }
   return out;
 }
 
