@@ -46,14 +46,7 @@ function toBinomialOptionsWasm(
     lons: Array.from(toFloat64Array(opts.lons)),
     successes: Array.from(toUint32Array(opts.successes)),
     trials: Array.from(toUint32Array(opts.trials)),
-    variogram: {
-      variogramType: opts.variogram.variogramType,
-      nugget: opts.variogram.nugget,
-      sill: opts.variogram.sill,
-      range: opts.variogram.range,
-      shape: opts.variogram.shape,
-      shape2: opts.variogram.shape2,
-    },
+    variogram: opts.variogram,
   };
 }
 
@@ -97,11 +90,7 @@ export class BinomialKriging {
         toFloat64Array(options.lons),
         toUint32Array(options.successes),
         toUint32Array(options.trials),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);
@@ -137,11 +126,7 @@ export class BinomialKriging {
           toFloat64Array(options.lats),
           toFloat64Array(options.lons),
           toFloat64Array(options.logits),
-          options.variogram.variogramType,
-          options.variogram.nugget,
-          options.variogram.sill,
-          options.variogram.range,
-          options.variogram.shape
+          options.variogram
         );
     } catch (e) {
       throw wrapThrown(e);

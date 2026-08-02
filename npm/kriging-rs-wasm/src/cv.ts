@@ -25,7 +25,6 @@ import { mapBinomialCvOutput, mapCvOutput } from "./internal/mappers.js";
 import { requireLoadedModule } from "./internal/module.js";
 import { resolveBinomialPrior } from "./internal/prior.js";
 import {
-  packSpaceTimeVariogram,
   requireSpaceTimeUniversalTrend,
 } from "./internal/spacetime.js";
 import type {
@@ -65,11 +64,7 @@ export function leaveOneOut(options: LeaveOneOutOptions): CvResult {
       toFloat64Array(options.lats),
       toFloat64Array(options.lons),
       toFloat64Array(options.values),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -90,11 +85,7 @@ export function kFold(options: KFoldOptions): CvResult {
       toFloat64Array(options.lons),
       toFloat64Array(options.values),
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -114,11 +105,7 @@ export function leaveOneOutSimple(options: LeaveOneOutSimpleOptions): CvResult {
       toFloat64Array(options.lons),
       toFloat64Array(options.values),
       options.mean,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -136,11 +123,7 @@ export function kFoldSimple(options: KFoldSimpleOptions): CvResult {
       toFloat64Array(options.values),
       options.mean,
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -163,11 +146,7 @@ export function leaveOneOutUniversal(
       toFloat64Array(options.lons),
       toFloat64Array(options.values),
       options.trend,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -185,11 +164,7 @@ export function kFoldUniversal(options: KFoldUniversalOptions): CvResult {
       toFloat64Array(options.values),
       options.trend,
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -213,11 +188,7 @@ export function leaveOneOutProjected(
       toFloat64Array(options.values),
       options.majorAngleDeg,
       options.rangeRatio,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -236,11 +207,7 @@ export function kFoldProjected(options: KFoldProjectedOptions): CvResult {
       options.majorAngleDeg,
       options.rangeRatio,
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -265,11 +232,7 @@ export function leaveOneOutBinomial(
       toFloat64Array(options.lons),
       toUint32Array(options.successes),
       toUint32Array(options.trials),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
+      options.variogram,
       alpha,
       beta
     );
@@ -290,11 +253,7 @@ export function kFoldBinomial(options: KFoldBinomialOptions): BinomialCvResult {
       toUint32Array(options.successes),
       toUint32Array(options.trials),
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
+      options.variogram,
       alpha,
       beta
     );
@@ -322,11 +281,7 @@ export function leaveOneOutBinomialProjected(
       toUint32Array(options.trials),
       options.majorAngleDeg,
       options.rangeRatio,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
+      options.variogram,
       alpha,
       beta
     );
@@ -351,11 +306,7 @@ export function kFoldBinomialProjected(
       options.majorAngleDeg,
       options.rangeRatio,
       options.k,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
+      options.variogram,
       alpha,
       beta
     );
@@ -377,29 +328,13 @@ export function leaveOneOutSpaceTime(
   options: LeaveOneOutSpaceTimeOptions
 ): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.leaveOneOutSpaceTime(
       toFloat64Array(options.lats),
       toFloat64Array(options.lons),
       toFloat64Array(options.times),
       toFloat64Array(options.values),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -410,7 +345,6 @@ export function leaveOneOutSpaceTime(
 /** K-fold CV for space-time ordinary kriging. */
 export function kFoldSpaceTime(options: KFoldSpaceTimeOptions): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.kFoldSpaceTime(
       toFloat64Array(options.lats),
@@ -418,22 +352,7 @@ export function kFoldSpaceTime(options: KFoldSpaceTimeOptions): CvResult {
       toFloat64Array(options.times),
       toFloat64Array(options.values),
       options.k,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -446,7 +365,6 @@ export function leaveOneOutSpaceTimeSimple(
   options: LeaveOneOutSpaceTimeSimpleOptions
 ): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.leaveOneOutSpaceTimeSimple(
       toFloat64Array(options.lats),
@@ -454,22 +372,7 @@ export function leaveOneOutSpaceTimeSimple(
       toFloat64Array(options.times),
       toFloat64Array(options.values),
       options.mean,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -482,7 +385,6 @@ export function kFoldSpaceTimeSimple(
   options: KFoldSpaceTimeSimpleOptions
 ): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.kFoldSpaceTimeSimple(
       toFloat64Array(options.lats),
@@ -491,22 +393,7 @@ export function kFoldSpaceTimeSimple(
       toFloat64Array(options.values),
       options.mean,
       options.k,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -522,7 +409,6 @@ export function leaveOneOutSpaceTimeUniversal(
   options: LeaveOneOutSpaceTimeUniversalOptions
 ): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   const trend = requireSpaceTimeUniversalTrend(options.trend);
   try {
     const out = mod.leaveOneOutSpaceTimeUniversal(
@@ -531,22 +417,7 @@ export function leaveOneOutSpaceTimeUniversal(
       toFloat64Array(options.times),
       toFloat64Array(options.values),
       trend,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -559,7 +430,6 @@ export function kFoldSpaceTimeUniversal(
   options: KFoldSpaceTimeUniversalOptions
 ): CvResult {
   const mod = requireLoadedModule();
-  const packed = packSpaceTimeVariogram(options.variogram);
   const trend = requireSpaceTimeUniversalTrend(options.trend);
   try {
     const out = mod.kFoldSpaceTimeUniversal(
@@ -569,22 +439,7 @@ export function kFoldSpaceTimeUniversal(
       toFloat64Array(options.values),
       trend,
       options.k,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3
+      options.variogram
     );
     return mapCvOutput(out);
   } catch (e) {
@@ -601,7 +456,6 @@ export function leaveOneOutSpaceTimeBinomial(
 ): BinomialCvResult {
   const mod = requireLoadedModule();
   const { alpha, beta } = resolveBinomialPrior(options.prior);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.leaveOneOutSpaceTimeBinomial(
       toFloat64Array(options.lats),
@@ -609,22 +463,7 @@ export function leaveOneOutSpaceTimeBinomial(
       toFloat64Array(options.times),
       toUint32Array(options.successes),
       toUint32Array(options.trials),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       alpha,
       beta
     );
@@ -640,7 +479,6 @@ export function kFoldSpaceTimeBinomial(
 ): BinomialCvResult {
   const mod = requireLoadedModule();
   const { alpha, beta } = resolveBinomialPrior(options.prior);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.kFoldSpaceTimeBinomial(
       toFloat64Array(options.lats),
@@ -649,22 +487,7 @@ export function kFoldSpaceTimeBinomial(
       toUint32Array(options.successes),
       toUint32Array(options.trials),
       options.k,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       alpha,
       beta
     );

@@ -70,11 +70,7 @@ export class BinomialProjectedKriging {
         toFloat64Array(options.ys),
         toUint32Array(options.successes),
         toUint32Array(options.trials),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape,
+        options.variogram,
         options.majorAngleDeg,
         options.rangeRatio
       );
@@ -118,11 +114,7 @@ export class BinomialProjectedKriging {
         toFloat64Array(options.ys),
         toUint32Array(options.successes),
         toUint32Array(options.trials),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape,
+        options.variogram,
         options.majorAngleDeg,
         options.rangeRatio,
         options.prior.alpha,
@@ -161,11 +153,7 @@ export class BinomialProjectedKriging {
         toFloat64Array(options.xs),
         toFloat64Array(options.ys),
         toFloat64Array(options.logits),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape,
+        options.variogram,
         options.majorAngleDeg,
         options.rangeRatio
       );

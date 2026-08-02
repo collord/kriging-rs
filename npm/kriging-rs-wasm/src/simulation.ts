@@ -29,7 +29,6 @@ import {
 import { requireLoadedModule } from "./internal/module.js";
 import { resolveBinomialPrior } from "./internal/prior.js";
 import {
-  packSpaceTimeVariogram,
   requireSpaceTimeUniversalTrend,
 } from "./internal/spacetime.js";
 import type {
@@ -93,12 +92,7 @@ export function conditionalSimulate(
       toFloat64Array(options.conditioningValues),
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -129,12 +123,7 @@ export function conditionalSimulateSimple(
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
       options.mean,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -165,12 +154,7 @@ export function conditionalSimulateUniversal(
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
       options.trend,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -202,12 +186,7 @@ export function conditionalSimulateProjected(
       toFloat64Array(options.targetYs),
       options.majorAngleDeg,
       options.rangeRatio,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -247,12 +226,7 @@ export function conditionalSimulateBinomial(
       toUint32Array(options.trials),
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       alpha,
       beta,
       seed,
@@ -282,7 +256,6 @@ export function conditionalSimulateSpaceTime(
   const mod = requireLoadedModule();
   const seed = normalizeSeed(options.seed);
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.conditionalSimulateSpaceTime(
       toFloat64Array(options.conditioningLats),
@@ -292,22 +265,7 @@ export function conditionalSimulateSpaceTime(
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -324,7 +282,6 @@ export function conditionalSimulateSpaceTimeSimple(
   const mod = requireLoadedModule();
   const seed = normalizeSeed(options.seed);
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.conditionalSimulateSpaceTimeSimple(
       toFloat64Array(options.conditioningLats),
@@ -335,22 +292,7 @@ export function conditionalSimulateSpaceTimeSimple(
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
       options.mean,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -371,7 +313,6 @@ export function conditionalSimulateSpaceTimeUniversal(
   const mod = requireLoadedModule();
   const seed = normalizeSeed(options.seed);
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   const trend = requireSpaceTimeUniversalTrend(options.trend);
   try {
     const out = mod.conditionalSimulateSpaceTimeUniversal(
@@ -383,22 +324,7 @@ export function conditionalSimulateSpaceTimeUniversal(
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
       trend,
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       seed,
       targetOrder
     );
@@ -420,7 +346,6 @@ export function conditionalSimulateSpaceTimeBinomial(
   const { alpha, beta } = resolveBinomialPrior(options.prior);
   const seed = normalizeSeed(options.seed);
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const raw = mod.conditionalSimulateSpaceTimeBinomial(
       toFloat64Array(options.conditioningLats),
@@ -431,22 +356,7 @@ export function conditionalSimulateSpaceTimeBinomial(
       toFloat64Array(options.targetLats),
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       alpha,
       beta,
       seed,
@@ -492,12 +402,7 @@ export function conditionalSimulateMany(
       toFloat64Array(options.conditioningValues),
       targetLats,
       toFloat64Array(options.targetLons),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       n,
       baseSeed,
       targetOrder
@@ -524,7 +429,6 @@ export function conditionalSimulateManySpaceTime(
 
   const mod = requireLoadedModule();
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const out = mod.conditionalSimulateSpaceTimeMany(
       toFloat64Array(options.conditioningLats),
@@ -534,22 +438,7 @@ export function conditionalSimulateManySpaceTime(
       targetLats,
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       n,
       baseSeed,
       targetOrder
@@ -605,12 +494,7 @@ export function conditionalSimulateManyBinomial(
       toUint32Array(options.trials),
       targetLats,
       toFloat64Array(options.targetLons),
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       alpha,
       beta,
       n,
@@ -637,7 +521,6 @@ export function conditionalSimulateManySpaceTimeBinomial(
   const mod = requireLoadedModule();
   const { alpha, beta } = resolveBinomialPrior(options.prior);
   const targetOrder = normalizeTargetOrder(options.targetOrder);
-  const packed = packSpaceTimeVariogram(options.variogram);
   try {
     const raw = mod.conditionalSimulateSpaceTimeManyBinomial(
       toFloat64Array(options.conditioningLats),
@@ -648,22 +531,7 @@ export function conditionalSimulateManySpaceTimeBinomial(
       targetLats,
       toFloat64Array(options.targetLons),
       toFloat64Array(options.targetTimes),
-      packed.family,
-      packed.spatialType,
-      packed.spatialNugget,
-      packed.spatialSill,
-      packed.spatialRange,
-      packed.spatialShape,
-      packed.spatialShape2,
-      packed.temporalType,
-      packed.temporalNugget,
-      packed.temporalSill,
-      packed.temporalRange,
-      packed.temporalShape,
-      packed.temporalShape2,
-      packed.k1,
-      packed.k2,
-      packed.k3,
+      options.variogram,
       alpha,
       beta,
       n,
@@ -699,12 +567,7 @@ export function conditionalSimulateBinomialProjected(
       toFloat64Array(options.targetYs),
       options.majorAngleDeg,
       options.rangeRatio,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       alpha,
       beta,
       seed,
@@ -744,12 +607,7 @@ export function conditionalSimulateManyBinomialProjected(
       toFloat64Array(options.targetYs),
       options.majorAngleDeg,
       options.rangeRatio,
-      options.variogram.variogramType,
-      options.variogram.nugget,
-      options.variogram.sill,
-      options.variogram.range,
-      options.variogram.shape,
-      options.variogram.shape2,
+      options.variogram,
       alpha,
       beta,
       n,

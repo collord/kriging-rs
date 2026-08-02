@@ -54,11 +54,7 @@ export class SimpleKriging {
         toFloat64Array(options.lons),
         toFloat64Array(options.values),
         options.mean,
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);

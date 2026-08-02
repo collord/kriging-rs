@@ -60,14 +60,7 @@ export class OrdinaryKriging {
           lats: Array.from(toFloat64Array(options.lats)),
           lons: Array.from(toFloat64Array(options.lons)),
           values: Array.from(toFloat64Array(options.values)),
-          variogram: {
-            variogramType: String(options.variogram.variogramType),
-            nugget: options.variogram.nugget,
-            sill: options.variogram.sill,
-            range: options.variogram.range,
-            shape: options.variogram.shape,
-            shape2: options.variogram.shape2,
-          },
+          variogram: options.variogram,
         });
       } else {
         // Prefer the zero-object-overhead `fromArrays` factory: it skips the
@@ -77,11 +70,7 @@ export class OrdinaryKriging {
           toFloat64Array(options.lats),
           toFloat64Array(options.lons),
           toFloat64Array(options.values),
-          options.variogram.variogramType,
-          options.variogram.nugget,
-          options.variogram.sill,
-          options.variogram.range,
-          options.variogram.shape
+          options.variogram
         );
       }
     } catch (e) {

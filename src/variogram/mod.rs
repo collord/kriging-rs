@@ -12,6 +12,7 @@ pub mod experimental_3d;
 pub mod fitting;
 pub mod models;
 pub mod nested;
+pub mod spec;
 
 pub use directional_3d::{
     DirectionFilter3D, DirectionalConfig3D, compute_directional_variogram_3d,
@@ -27,3 +28,4 @@ pub use fitting::{
 };
 pub use models::{VariogramModel, VariogramType};
 pub use nested::NestedVariogram;
+pub use spec::VariogramSpec;

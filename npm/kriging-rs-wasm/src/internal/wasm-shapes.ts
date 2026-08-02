@@ -87,19 +87,32 @@ export interface WasmBinomialInstance {
   ): Promise<unknown>;
 }
 
+/** Variogram spec passed opaquely to WASM (camelCase; serde-deserialized once). */
+export interface VariogramSpecWasm {
+  variogramType: string;
+  nugget: number;
+  sill: number;
+  range: number;
+  shape?: number;
+  shape2?: number;
+}
+
+/** Space-time variogram spec passed opaquely to WASM. */
+export interface SpaceTimeVariogramSpecWasm {
+  family: string;
+  spatial: VariogramSpecWasm;
+  temporal: VariogramSpecWasm;
+  k1?: number;
+  k2?: number;
+  k3?: number;
+}
+
 /** Shape passed to WASM (plain arrays for serde deserialization). */
 export interface OrdinaryKrigingOptionsWasm {
   lats: number[];
   lons: number[];
   values: number[];
-  variogram: {
-    variogramType: string;
-    nugget: number;
-    sill: number;
-    range: number;
-    shape?: number;
-    shape2?: number;
-  };
+  variogram: VariogramSpecWasm;
 }
 
 export interface BinomialKrigingOptionsWasm {
@@ -107,14 +120,7 @@ export interface BinomialKrigingOptionsWasm {
   lons: number[];
   successes: number[];
   trials: number[];
-  variogram: {
-    variogramType: string;
-    nugget: number;
-    sill: number;
-    range: number;
-    shape?: number;
-    shape2?: number;
-  };
+  variogram: VariogramSpecWasm;
 }
 
 export interface BinomialKrigingWithPriorOptionsWasm extends BinomialKrigingOptionsWasm {
@@ -130,11 +136,7 @@ export type RawModule = {
       lats: Float64Array,
       lons: Float64Array,
       values: Float64Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape?: number
+      variogram: VariogramSpecWasm
     ): WasmOrdinaryInstance;
   };
   WasmBinomialKriging: {
@@ -147,21 +149,13 @@ export type RawModule = {
       lons: Float64Array,
       successes: Uint32Array,
       trials: Uint32Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape?: number
+      variogram: VariogramSpecWasm
     ): WasmBinomialInstance;
     fromPrecomputedLogits(
       lats: Float64Array,
       lons: Float64Array,
       logits: Float64Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape?: number
+      variogram: VariogramSpecWasm
     ): WasmBinomialInstance;
   };
   WasmSimpleKriging?: {
@@ -170,11 +164,7 @@ export type RawModule = {
       lons: Float64Array,
       values: Float64Array,
       mean: number,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape?: number
+      variogram: VariogramSpecWasm
     ): WasmSimpleInstance;
   };
   WasmUniversalKriging?: {
@@ -183,11 +173,7 @@ export type RawModule = {
       lons: Float64Array,
       values: Float64Array,
       trend: string,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape?: number
+      variogram: VariogramSpecWasm
     ): WasmUniversalInstance;
   };
   WasmProjectedKriging?: {
@@ -195,11 +181,7 @@ export type RawModule = {
       xs: Float64Array,
       ys: Float64Array,
       values: Float64Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined,
+      variogram: VariogramSpecWasm,
       majorAngleDeg: number,
       rangeRatio: number
     ): WasmProjectedInstance;
@@ -210,11 +192,7 @@ export type RawModule = {
       ys: Float64Array,
       successes: Uint32Array,
       trials: Uint32Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined,
+      variogram: VariogramSpecWasm,
       majorAngleDeg: number,
       rangeRatio: number
     ): WasmBinomialProjectedInstance;
@@ -223,11 +201,7 @@ export type RawModule = {
       ys: Float64Array,
       successes: Uint32Array,
       trials: Uint32Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined,
+      variogram: VariogramSpecWasm,
       majorAngleDeg: number,
       rangeRatio: number,
       priorAlpha: number,
@@ -237,11 +211,7 @@ export type RawModule = {
       xs: Float64Array,
       ys: Float64Array,
       logits: Float64Array,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined,
+      variogram: VariogramSpecWasm,
       majorAngleDeg: number,
       rangeRatio: number
     ): WasmBinomialProjectedInstance;
@@ -287,33 +257,21 @@ export type RawModule = {
     lats: Float64Array,
     lons: Float64Array,
     values: Float64Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   kFold: (
     lats: Float64Array,
     lons: Float64Array,
     values: Float64Array,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   leaveOneOutSimple: (
     lats: Float64Array,
     lons: Float64Array,
     values: Float64Array,
     mean: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   kFoldSimple: (
     lats: Float64Array,
@@ -321,22 +279,14 @@ export type RawModule = {
     values: Float64Array,
     mean: number,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   leaveOneOutUniversal: (
     lats: Float64Array,
     lons: Float64Array,
     values: Float64Array,
     trend: string,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   kFoldUniversal: (
     lats: Float64Array,
@@ -344,11 +294,7 @@ export type RawModule = {
     values: Float64Array,
     trend: string,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   leaveOneOutProjected: (
     xs: Float64Array,
@@ -356,11 +302,7 @@ export type RawModule = {
     values: Float64Array,
     majorAngleDeg: number,
     rangeRatio: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   kFoldProjected: (
     xs: Float64Array,
@@ -369,22 +311,14 @@ export type RawModule = {
     majorAngleDeg: number,
     rangeRatio: number,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number
+    variogram: VariogramSpecWasm
   ) => unknown;
   leaveOneOutBinomial: (
     lats: Float64Array,
     lons: Float64Array,
     successes: Uint32Array,
     trials: Uint32Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number,
+    variogram: VariogramSpecWasm,
     priorAlpha?: number,
     priorBeta?: number
   ) => unknown;
@@ -394,11 +328,7 @@ export type RawModule = {
     successes: Uint32Array,
     trials: Uint32Array,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number,
+    variogram: VariogramSpecWasm,
     priorAlpha?: number,
     priorBeta?: number
   ) => unknown;
@@ -409,11 +339,7 @@ export type RawModule = {
     trials: Uint32Array,
     majorAngleDeg: number,
     rangeRatio: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number,
+    variogram: VariogramSpecWasm,
     priorAlpha?: number,
     priorBeta?: number
   ) => unknown;
@@ -425,11 +351,7 @@ export type RawModule = {
     majorAngleDeg: number,
     rangeRatio: number,
     k: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape?: number,
+    variogram: VariogramSpecWasm,
     priorAlpha?: number,
     priorBeta?: number
   ) => unknown;
@@ -439,12 +361,7 @@ export type RawModule = {
     conditioningValues: Float64Array,
     targetLats: Float64Array,
     targetLons: Float64Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -455,12 +372,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     mean: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -471,12 +383,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     trend: string,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -488,12 +395,7 @@ export type RawModule = {
     targetYs: Float64Array,
     majorAngleDeg: number,
     rangeRatio: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -504,12 +406,7 @@ export type RawModule = {
     trials: Uint32Array,
     targetLats: Float64Array,
     targetLons: Float64Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     seed: bigint,
@@ -521,12 +418,7 @@ export type RawModule = {
     conditioningValues: Float64Array,
     targetLats: Float64Array,
     targetLons: Float64Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     nRealizations: number,
     baseSeed: bigint,
     targetOrder?: Uint32Array
@@ -538,12 +430,7 @@ export type RawModule = {
     trials: Uint32Array,
     targetLats: Float64Array,
     targetLons: Float64Array,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     nRealizations: number,
@@ -559,12 +446,7 @@ export type RawModule = {
     targetYs: Float64Array,
     majorAngleDeg: number,
     rangeRatio: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     seed: bigint,
@@ -579,12 +461,7 @@ export type RawModule = {
     targetYs: Float64Array,
     majorAngleDeg: number,
     rangeRatio: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
-    shape2: number | undefined,
+    variogram: VariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     nRealizations: number,
@@ -610,22 +487,7 @@ export type RawModule = {
     lons: Float64Array,
     times: Float64Array,
     values: Float64Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   kFoldSpaceTime: (
     lats: Float64Array,
@@ -633,22 +495,7 @@ export type RawModule = {
     times: Float64Array,
     values: Float64Array,
     k: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   leaveOneOutSpaceTimeSimple: (
     lats: Float64Array,
@@ -656,22 +503,7 @@ export type RawModule = {
     times: Float64Array,
     values: Float64Array,
     mean: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   kFoldSpaceTimeSimple: (
     lats: Float64Array,
@@ -680,22 +512,7 @@ export type RawModule = {
     values: Float64Array,
     mean: number,
     k: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   leaveOneOutSpaceTimeUniversal: (
     lats: Float64Array,
@@ -703,22 +520,7 @@ export type RawModule = {
     times: Float64Array,
     values: Float64Array,
     trend: string,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   kFoldSpaceTimeUniversal: (
     lats: Float64Array,
@@ -727,22 +529,7 @@ export type RawModule = {
     values: Float64Array,
     trend: string,
     k: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined
+    variogram: SpaceTimeVariogramSpecWasm
   ) => unknown;
   leaveOneOutSpaceTimeBinomial: (
     lats: Float64Array,
@@ -750,22 +537,7 @@ export type RawModule = {
     times: Float64Array,
     successes: Uint32Array,
     trials: Uint32Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined
   ) => unknown;
@@ -776,22 +548,7 @@ export type RawModule = {
     successes: Uint32Array,
     trials: Uint32Array,
     k: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined
   ) => unknown;
@@ -803,22 +560,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     targetTimes: Float64Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -831,22 +573,7 @@ export type RawModule = {
     targetLons: Float64Array,
     targetTimes: Float64Array,
     mean: number,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -859,22 +586,7 @@ export type RawModule = {
     targetLons: Float64Array,
     targetTimes: Float64Array,
     trend: string,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     seed: bigint,
     targetOrder?: Uint32Array
   ) => unknown;
@@ -887,22 +599,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     targetTimes: Float64Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     seed: bigint,
@@ -916,22 +613,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     targetTimes: Float64Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     nRealizations: number,
     baseSeed: bigint,
     targetOrder?: Uint32Array
@@ -945,22 +627,7 @@ export type RawModule = {
     targetLats: Float64Array,
     targetLons: Float64Array,
     targetTimes: Float64Array,
-    family: string,
-    spatialType: string,
-    spatialNugget: number,
-    spatialSill: number,
-    spatialRange: number,
-    spatialShape: number | undefined,
-    spatialShape2: number | undefined,
-    temporalType: string,
-    temporalNugget: number,
-    temporalSill: number,
-    temporalRange: number,
-    temporalShape: number | undefined,
-    temporalShape2: number | undefined,
-    k1: number | undefined,
-    k2: number | undefined,
-    k3: number | undefined,
+    variogram: SpaceTimeVariogramSpecWasm,
     priorAlpha: number | undefined,
     priorBeta: number | undefined,
     nRealizations: number,
@@ -973,22 +640,7 @@ export type RawModule = {
       lons: Float64Array,
       times: Float64Array,
       values: Float64Array,
-      family: string,
-      spatialType: string,
-      spatialNugget: number,
-      spatialSill: number,
-      spatialRange: number,
-      spatialShape: number | undefined,
-      spatialShape2: number | undefined,
-      temporalType: string,
-      temporalNugget: number,
-      temporalSill: number,
-      temporalRange: number,
-      temporalShape: number | undefined,
-      temporalShape2: number | undefined,
-      k1: number | undefined,
-      k2: number | undefined,
-      k3: number | undefined
+      variogram: SpaceTimeVariogramSpecWasm
     ): WasmSpaceTimeInstance;
   };
   WasmSpaceTimeSimpleKriging?: {
@@ -998,22 +650,7 @@ export type RawModule = {
       times: Float64Array,
       values: Float64Array,
       mean: number,
-      family: string,
-      spatialType: string,
-      spatialNugget: number,
-      spatialSill: number,
-      spatialRange: number,
-      spatialShape: number | undefined,
-      spatialShape2: number | undefined,
-      temporalType: string,
-      temporalNugget: number,
-      temporalSill: number,
-      temporalRange: number,
-      temporalShape: number | undefined,
-      temporalShape2: number | undefined,
-      k1: number | undefined,
-      k2: number | undefined,
-      k3: number | undefined
+      variogram: SpaceTimeVariogramSpecWasm
     ): WasmSpaceTimeInstance;
   };
   WasmSpaceTimeUniversalKriging?: {
@@ -1023,22 +660,7 @@ export type RawModule = {
       times: Float64Array,
       values: Float64Array,
       trend: string,
-      family: string,
-      spatialType: string,
-      spatialNugget: number,
-      spatialSill: number,
-      spatialRange: number,
-      spatialShape: number | undefined,
-      spatialShape2: number | undefined,
-      temporalType: string,
-      temporalNugget: number,
-      temporalSill: number,
-      temporalRange: number,
-      temporalShape: number | undefined,
-      temporalShape2: number | undefined,
-      k1: number | undefined,
-      k2: number | undefined,
-      k3: number | undefined
+      variogram: SpaceTimeVariogramSpecWasm
     ): WasmSpaceTimeInstance;
   };
   WasmSpaceTimeBinomialKriging?: {
@@ -1048,22 +670,7 @@ export type RawModule = {
       times: Float64Array,
       successes: Uint32Array,
       trials: Uint32Array,
-      family: string,
-      spatialType: string,
-      spatialNugget: number,
-      spatialSill: number,
-      spatialRange: number,
-      spatialShape: number | undefined,
-      spatialShape2: number | undefined,
-      temporalType: string,
-      temporalNugget: number,
-      temporalSill: number,
-      temporalRange: number,
-      temporalShape: number | undefined,
-      temporalShape2: number | undefined,
-      k1: number | undefined,
-      k2: number | undefined,
-      k3: number | undefined
+      variogram: SpaceTimeVariogramSpecWasm
     ): WasmSpaceTimeBinomialInstance;
   };
   WasmSpaceTimeOrdinaryProjectedKriging?: {
@@ -1074,22 +681,7 @@ export type RawModule = {
       values: Float64Array,
       majorAngleDeg: number,
       rangeRatio: number,
-      family: string,
-      spatialType: string,
-      spatialNugget: number,
-      spatialSill: number,
-      spatialRange: number,
-      spatialShape: number | undefined,
-      spatialShape2: number | undefined,
-      temporalType: string,
-      temporalNugget: number,
-      temporalSill: number,
-      temporalRange: number,
-      temporalShape: number | undefined,
-      temporalShape2: number | undefined,
-      k1: number | undefined,
-      k2: number | undefined,
-      k3: number | undefined
+      variogram: SpaceTimeVariogramSpecWasm
     ): WasmSpaceTimeInstance;
   };
   wasmComputeEmpiricalSpaceTimeVariogram: (

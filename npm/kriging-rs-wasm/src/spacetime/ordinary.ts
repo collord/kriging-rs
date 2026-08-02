@@ -14,7 +14,6 @@ import {
 import { requireLoadedModule } from "../internal/module.js";
 import {
   fittedToSpaceTimeVariogramParams,
-  packSpaceTimeVariogram,
 } from "../internal/spacetime.js";
 import type { WasmSpaceTimeInstance } from "../internal/wasm-shapes.js";
 import type {
@@ -46,29 +45,13 @@ export class SpaceTimeOrdinaryKriging {
         { code: "backend_unavailable" }
       );
     }
-    const packed = packSpaceTimeVariogram(options.variogram);
     try {
       this.inner = ctor.fromArrays(
         toFloat64Array(options.lats),
         toFloat64Array(options.lons),
         toFloat64Array(options.times),
         toFloat64Array(options.values),
-        packed.family,
-        packed.spatialType,
-        packed.spatialNugget,
-        packed.spatialSill,
-        packed.spatialRange,
-        packed.spatialShape,
-        packed.spatialShape2,
-        packed.temporalType,
-        packed.temporalNugget,
-        packed.temporalSill,
-        packed.temporalRange,
-        packed.temporalShape,
-        packed.temporalShape2,
-        packed.k1,
-        packed.k2,
-        packed.k3
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);

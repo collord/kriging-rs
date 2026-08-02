@@ -47,6 +47,7 @@ use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal, VariogramCon
 use crate::variogram::fitting::fit_variogram;
 use crate::variogram::models::{VariogramModel, VariogramType};
 use crate::variogram::nested::NestedVariogram;
+use crate::variogram::spec::VariogramSpec;
 use crate::{Real, compute_empirical_variogram};
 use std::num::NonZeroUsize;
 
@@ -83,66 +84,22 @@ impl From<WasmVariogramType> for VariogramType {
     }
 }
 
-pub(super) fn parse_variogram(
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-) -> Result<VariogramModel, JsValue> {
-    parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, None)
+/// Build a [`VariogramModel`] from a [`VariogramSpec`], preserving the WASM error codes
+/// (`unknown_variogram` for an unrecognized type; the model constructor's code otherwise).
+pub(super) fn spec_to_model(spec: &VariogramSpec) -> Result<VariogramModel, JsValue> {
+    let vt = spec
+        .resolve_type()
+        .ok_or_else(|| coded_err("unknown variogram_type", "unknown_variogram"))?;
+    spec.build(vt).map_err(kriging_err_to_js)
 }
 
-/// Like [`parse_variogram`] but accepting a second shape parameter for two-shape families.
-///
-/// `shape` is the primary shape (Stable: alpha; Matérn/CH: nu; Power: exponent). `shape2` is
-/// only consulted by the Confluent Hypergeometric family, where it is the tail-decay `alpha`.
-pub(super) fn parse_variogram_with_shape2(
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
-) -> Result<VariogramModel, JsValue> {
-    let vt = match variogram_type.to_ascii_lowercase().as_str() {
-        "spherical" => VariogramType::Spherical,
-        "exponential" => VariogramType::Exponential,
-        "gaussian" => VariogramType::Gaussian,
-        "cubic" => VariogramType::Cubic,
-        "stable" => VariogramType::Stable,
-        "matern" => VariogramType::Matern,
-        "power" => VariogramType::Power,
-        "holeeffect" | "hole_effect" | "hole-effect" => VariogramType::HoleEffect,
-        "confluenthypergeometric"
-        | "confluent_hypergeometric"
-        | "confluent-hypergeometric"
-        | "ch" => VariogramType::ConfluentHypergeometric,
-        _ => return Err(coded_err("unknown variogram_type", "unknown_variogram")),
-    };
-    match (vt, shape) {
-        (VariogramType::ConfluentHypergeometric, Some(s)) => VariogramModel::new_with_shapes(
-            nugget as Real,
-            sill as Real,
-            range as Real,
-            vt,
-            s as Real,
-            shape2.map(|a| a as Real),
-        )
-        .map_err(kriging_err_to_js),
-        (VariogramType::Stable, Some(s))
-        | (VariogramType::Matern, Some(s))
-        | (VariogramType::Power, Some(s)) => VariogramModel::new_with_shape(
-            nugget as Real,
-            sill as Real,
-            range as Real,
-            vt,
-            s as Real,
-        )
-        .map_err(kriging_err_to_js),
-        _ => VariogramModel::new(nugget as Real, sill as Real, range as Real, vt)
-            .map_err(kriging_err_to_js),
-    }
+/// Deserialize a JS variogram-spec object (`{ variogramType, nugget, sill, range, shape?,
+/// shape2? }`) and build the model. This is the single object entry point that replaces the
+/// flat positional `(type, nugget, sill, range, shape, shape2)` argument lists — adding a new
+/// parameter means adding a field to [`VariogramSpec`], nothing here.
+pub(super) fn variogram_model_from_js(variogram: JsValue) -> Result<VariogramModel, JsValue> {
+    let spec: VariogramSpec = serde_wasm_bindgen::from_value(variogram).map_err(err_to_js)?;
+    spec_to_model(&spec)
 }
 
 /// Build a row-major grid of `GeoCoord`s spanning `[y_min, y_max] × [x_min, x_max]`. The
@@ -375,23 +332,7 @@ struct OrdinaryKrigingOptions {
     lats: Vec<f64>,
     lons: Vec<f64>,
     values: Vec<f64>,
-    variogram: VariogramParams,
-}
-
-/// Variogram parameters (nugget, sill, range, optional shape).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VariogramParams {
-    variogram_type: String,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    #[serde(default)]
-    shape: Option<f64>,
-    /// Second shape parameter, consulted only by two-shape families (Confluent
-    /// Hypergeometric tail-decay `alpha`). Ignored for all other model types.
-    #[serde(default)]
-    shape2: Option<f64>,
+    variogram: VariogramSpec,
 }
 
 /// Options for binomial kriging model construction (JS: single object argument).
@@ -402,7 +343,7 @@ struct BinomialKrigingOptions {
     lons: Vec<f64>,
     successes: Vec<u32>,
     trials: Vec<u32>,
-    variogram: VariogramParams,
+    variogram: VariogramSpec,
 }
 
 /// Prior parameters for binomial kriging (Beta(alpha, beta)).
@@ -421,7 +362,7 @@ struct BinomialKrigingWithPriorOptions {
     lons: Vec<f64>,
     successes: Vec<u32>,
     trials: Vec<u32>,
-    variogram: VariogramParams,
+    variogram: VariogramSpec,
     prior: BinomialPriorParams,
 }
 
@@ -437,14 +378,7 @@ impl WasmOrdinaryKriging {
         let opts: OrdinaryKrigingOptions =
             serde_wasm_bindgen::from_value(options).map_err(err_to_js)?;
         let coords = to_coords(&opts.lats, &opts.lons)?;
-        let model = parse_variogram_with_shape2(
-            &opts.variogram.variogram_type,
-            opts.variogram.nugget,
-            opts.variogram.sill,
-            opts.variogram.range,
-            opts.variogram.shape,
-            opts.variogram.shape2,
-        )?;
+        let model = spec_to_model(&opts.variogram)?;
         let values_real = opts.values.iter().map(|v| *v as Real).collect::<Vec<_>>();
         let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
         let inner = OrdinaryKrigingModel::new(dataset, model).map_err(kriging_err_to_js)?;
@@ -459,11 +393,7 @@ impl WasmOrdinaryKriging {
         lats: &[f64],
         lons: &[f64],
         values: &[f64],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmOrdinaryKriging, JsValue> {
         if values.len() != lats.len() {
             return Err(coded_err(
@@ -472,7 +402,7 @@ impl WasmOrdinaryKriging {
             ));
         }
         let coords = to_coords(lats, lons)?;
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let values_real = values.iter().map(|v| *v as Real).collect::<Vec<_>>();
         let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
         let inner = OrdinaryKrigingModel::new(dataset, model).map_err(kriging_err_to_js)?;
@@ -649,14 +579,7 @@ impl WasmBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram_with_shape2(
-            &opts.variogram.variogram_type,
-            opts.variogram.nugget,
-            opts.variogram.sill,
-            opts.variogram.range,
-            opts.variogram.shape,
-            opts.variogram.shape2,
-        )?;
+        let model = spec_to_model(&opts.variogram)?;
         let hcfg = HeteroskedasticBinomialConfig::default();
         let fit = BinomialKrigingModel::new_with_config(
             observations,
@@ -680,11 +603,7 @@ impl WasmBinomialKriging {
         lons: &[f64],
         successes: &[u32],
         trials: &[u32],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmBinomialKriging, JsValue> {
         let (observations, zero_trial_drops) = build_observations(lats, lons, successes, trials)?;
         if observations.len() < 2 {
@@ -693,7 +612,7 @@ impl WasmBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let hcfg = HeteroskedasticBinomialConfig::default();
         let fit = BinomialKrigingModel::new_with_config(
             observations,
@@ -717,11 +636,7 @@ impl WasmBinomialKriging {
         lats: &[f64],
         lons: &[f64],
         logits: &[f64],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmBinomialKriging, JsValue> {
         if logits.len() != lats.len() {
             return Err(coded_err(
@@ -731,7 +646,7 @@ impl WasmBinomialKriging {
         }
         let coords = to_coords(lats, lons)?;
         let logits_real: Vec<Real> = logits.iter().map(|v| *v as Real).collect();
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let fit = BinomialKrigingModel::from_precomputed_logits(coords, logits_real, model)
             .map_err(kriging_err_to_js)?;
         Ok(Self {
@@ -752,14 +667,7 @@ impl WasmBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram_with_shape2(
-            &opts.variogram.variogram_type,
-            opts.variogram.nugget,
-            opts.variogram.sill,
-            opts.variogram.range,
-            opts.variogram.shape,
-            opts.variogram.shape2,
-        )?;
+        let model = spec_to_model(&opts.variogram)?;
         let prior = BinomialPrior::new(opts.prior.alpha as Real, opts.prior.beta as Real)
             .map_err(kriging_err_to_js)?;
         let hcfg = HeteroskedasticBinomialConfig::default();
@@ -1105,11 +1013,7 @@ impl WasmSimpleKriging {
         lons: &[f64],
         values: &[f64],
         mean: f64,
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSimpleKriging, JsValue> {
         if values.len() != lats.len() {
             return Err(coded_err(
@@ -1118,7 +1022,7 @@ impl WasmSimpleKriging {
             ));
         }
         let coords = to_coords(lats, lons)?;
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
         let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
         let inner =
@@ -1205,11 +1109,7 @@ impl WasmUniversalKriging {
         lons: &[f64],
         values: &[f64],
         trend: &str,
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmUniversalKriging, JsValue> {
         if values.len() != lats.len() {
             return Err(coded_err(
@@ -1219,7 +1119,7 @@ impl WasmUniversalKriging {
         }
         let trend = parse_trend(trend)?;
         let coords = to_coords(lats, lons)?;
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
         let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
         let inner = UniversalKrigingModel::new(dataset, model, trend).map_err(kriging_err_to_js)?;
@@ -1288,11 +1188,7 @@ impl WasmProjectedKriging {
         xs: &[f64],
         ys: &[f64],
         values: &[f64],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
         major_angle_deg: f64,
         range_ratio: f64,
     ) -> Result<WasmProjectedKriging, JsValue> {
@@ -1308,7 +1204,7 @@ impl WasmProjectedKriging {
             .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
             .collect();
         let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
             .map_err(kriging_err_to_js)?;
         let dataset = ProjectedDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
@@ -1431,11 +1327,7 @@ impl WasmBinomialProjectedKriging {
         ys: &[f64],
         successes: &[u32],
         trials: &[u32],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
         major_angle_deg: f64,
         range_ratio: f64,
     ) -> Result<WasmBinomialProjectedKriging, JsValue> {
@@ -1447,7 +1339,7 @@ impl WasmBinomialProjectedKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
             .map_err(kriging_err_to_js)?;
         let fit = BinomialProjectedKrigingModel::new(observations, model, anisotropy)
@@ -1468,11 +1360,7 @@ impl WasmBinomialProjectedKriging {
         ys: &[f64],
         successes: &[u32],
         trials: &[u32],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
         major_angle_deg: f64,
         range_ratio: f64,
         prior_alpha: f64,
@@ -1486,7 +1374,7 @@ impl WasmBinomialProjectedKriging {
                 "insufficient_data",
             ));
         }
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
             .map_err(kriging_err_to_js)?;
         let prior = BinomialPrior::new(prior_alpha as Real, prior_beta as Real)
@@ -1510,11 +1398,7 @@ impl WasmBinomialProjectedKriging {
         xs: &[f64],
         ys: &[f64],
         logits: &[f64],
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
         major_angle_deg: f64,
         range_ratio: f64,
     ) -> Result<WasmBinomialProjectedKriging, JsValue> {
@@ -1530,7 +1414,7 @@ impl WasmBinomialProjectedKriging {
             .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
             .collect();
         let logits_real: Vec<Real> = logits.iter().map(|v| *v as Real).collect();
-        let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
             .map_err(kriging_err_to_js)?;
         let fit = BinomialProjectedKrigingModel::from_precomputed_logits(
@@ -1695,11 +1579,7 @@ pub fn wasm_leave_one_out(
     lats: &[f64],
     lons: &[f64],
     values: &[f64],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1709,7 +1589,7 @@ pub fn wasm_leave_one_out(
     }
     let coords = to_coords(lats, lons)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let residuals = leave_one_out(&coords, &values_real, model).map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
 }
@@ -1722,11 +1602,7 @@ pub fn wasm_k_fold(
     lons: &[f64],
     values: &[f64],
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1736,7 +1612,7 @@ pub fn wasm_k_fold(
     }
     let coords = to_coords(lats, lons)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let residuals = k_fold(&coords, &values_real, model, k).map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
 }
@@ -1751,11 +1627,7 @@ pub fn wasm_leave_one_out_simple(
     lons: &[f64],
     values: &[f64],
     mean: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     let coords = to_coords(lats, lons)?;
     if values.len() != lats.len() {
@@ -1765,7 +1637,7 @@ pub fn wasm_leave_one_out_simple(
         ));
     }
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let residuals = leave_one_out_simple(&coords, &values_real, model, mean as Real)
         .map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
@@ -1779,11 +1651,7 @@ pub fn wasm_k_fold_simple(
     values: &[f64],
     mean: f64,
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     let coords = to_coords(lats, lons)?;
     if values.len() != lats.len() {
@@ -1793,7 +1661,7 @@ pub fn wasm_k_fold_simple(
         ));
     }
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let residuals =
         k_fold_simple(&coords, &values_real, model, mean as Real, k).map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
@@ -1809,11 +1677,7 @@ pub fn wasm_leave_one_out_universal(
     lons: &[f64],
     values: &[f64],
     trend: &str,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     let coords = to_coords(lats, lons)?;
     if values.len() != lats.len() {
@@ -1823,7 +1687,7 @@ pub fn wasm_leave_one_out_universal(
         ));
     }
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let trend_enum = parse_trend(trend)?;
     let residuals = leave_one_out_universal(&coords, &values_real, model, trend_enum)
         .map_err(kriging_err_to_js)?;
@@ -1838,11 +1702,7 @@ pub fn wasm_k_fold_universal(
     values: &[f64],
     trend: &str,
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     let coords = to_coords(lats, lons)?;
     if values.len() != lats.len() {
@@ -1852,7 +1712,7 @@ pub fn wasm_k_fold_universal(
         ));
     }
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let trend_enum = parse_trend(trend)?;
     let residuals =
         k_fold_universal(&coords, &values_real, model, trend_enum, k).map_err(kriging_err_to_js)?;
@@ -1871,11 +1731,7 @@ pub fn wasm_leave_one_out_projected(
     values: &[f64],
     major_angle_deg: f64,
     range_ratio: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if xs.len() != ys.len() || xs.len() != values.len() {
         return Err(coded_err(
@@ -1889,7 +1745,7 @@ pub fn wasm_leave_one_out_projected(
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let residuals = leave_one_out_projected(&coords, &values_real, model, anisotropy)
@@ -1906,11 +1762,7 @@ pub fn wasm_k_fold_projected(
     major_angle_deg: f64,
     range_ratio: f64,
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if xs.len() != ys.len() || xs.len() != values.len() {
         return Err(coded_err(
@@ -1924,7 +1776,7 @@ pub fn wasm_k_fold_projected(
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let residuals =
@@ -2054,11 +1906,7 @@ pub fn wasm_leave_one_out_binomial(
     lons: &[f64],
     successes: &[u32],
     trials: &[u32],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -2069,7 +1917,7 @@ pub fn wasm_leave_one_out_binomial(
         ));
     }
     let coords = to_coords(lats, lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let residuals = leave_one_out_binomial(&coords, successes, trials, model, prior)
         .map_err(kriging_err_to_js)?;
@@ -2084,11 +1932,7 @@ pub fn wasm_k_fold_binomial(
     successes: &[u32],
     trials: &[u32],
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -2099,7 +1943,7 @@ pub fn wasm_k_fold_binomial(
         ));
     }
     let coords = to_coords(lats, lons)?;
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let residuals =
         k_fold_binomial(&coords, successes, trials, model, prior, k).map_err(kriging_err_to_js)?;
@@ -2118,11 +1962,7 @@ pub fn wasm_leave_one_out_binomial_projected(
     trials: &[u32],
     major_angle_deg: f64,
     range_ratio: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -2137,7 +1977,7 @@ pub fn wasm_leave_one_out_binomial_projected(
         .zip(ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
@@ -2157,11 +1997,7 @@ pub fn wasm_k_fold_binomial_projected(
     major_angle_deg: f64,
     range_ratio: f64,
     k: usize,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -2176,7 +2012,7 @@ pub fn wasm_k_fold_binomial_projected(
         .zip(ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
@@ -2213,12 +2049,7 @@ pub fn wasm_conditional_simulate(
     conditioning_values: &[f64],
     target_lats: &[f64],
     target_lons: &[f64],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2234,7 +2065,7 @@ pub fn wasm_conditional_simulate(
         .map(|v| *v as Real)
         .collect::<Vec<_>>();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let options = SimulationOptions {
         seed,
         target_order: target_order.map(|v| v.into_iter().map(|x| x as usize).collect()),
@@ -2265,12 +2096,7 @@ pub fn wasm_conditional_simulate_simple(
     target_lats: &[f64],
     target_lons: &[f64],
     mean: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2283,7 +2109,7 @@ pub fn wasm_conditional_simulate_simple(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = conditional_simulate_simple(
         &cond_coords,
@@ -2309,12 +2135,7 @@ pub fn wasm_conditional_simulate_universal(
     target_lats: &[f64],
     target_lons: &[f64],
     trend: &str,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2327,7 +2148,7 @@ pub fn wasm_conditional_simulate_universal(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let trend_enum = parse_trend(trend)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = conditional_simulate_universal(
@@ -2355,12 +2176,7 @@ pub fn wasm_conditional_simulate_projected(
     target_ys: &[f64],
     major_angle_deg: f64,
     range_ratio: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -2389,7 +2205,7 @@ pub fn wasm_conditional_simulate_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let options = parse_simulation_options(seed, target_order);
@@ -2440,12 +2256,7 @@ pub fn wasm_conditional_simulate_binomial(
     trials: &[u32],
     target_lats: &[f64],
     target_lons: &[f64],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     seed: u64,
@@ -2462,7 +2273,7 @@ pub fn wasm_conditional_simulate_binomial(
     }
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let options = parse_simulation_options(seed, target_order);
     let result = conditional_simulate_binomial(
@@ -2522,12 +2333,7 @@ pub fn wasm_conditional_simulate_many(
     conditioning_values: &[f64],
     target_lats: &[f64],
     target_lons: &[f64],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     n_realizations: u32,
     base_seed: u64,
     target_order: Option<Vec<u32>>,
@@ -2541,7 +2347,7 @@ pub fn wasm_conditional_simulate_many(
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let samples = conditional_simulate_many(
         &cond_coords,
@@ -2570,12 +2376,7 @@ pub fn wasm_conditional_simulate_many_binomial(
     trials: &[u32],
     target_lats: &[f64],
     target_lons: &[f64],
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     n_realizations: u32,
@@ -2593,7 +2394,7 @@ pub fn wasm_conditional_simulate_many_binomial(
     }
     let cond_coords = to_coords(conditioning_lats, conditioning_lons)?;
     let targets = to_coords(target_lats, target_lons)?;
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let result = conditional_simulate_many_binomial(
@@ -2626,12 +2427,7 @@ pub fn wasm_conditional_simulate_binomial_projected(
     target_ys: &[f64],
     major_angle_deg: f64,
     range_ratio: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     seed: u64,
@@ -2662,7 +2458,7 @@ pub fn wasm_conditional_simulate_binomial_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
@@ -2695,12 +2491,7 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
     target_ys: &[f64],
     major_angle_deg: f64,
     range_ratio: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
-    shape2: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     n_realizations: u32,
@@ -2732,7 +2523,7 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
         .zip(target_ys.iter())
         .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
         .collect();
-    let model = parse_variogram_with_shape2(variogram_type, nugget, sill, range, shape, shape2)?;
+    let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
@@ -2757,22 +2548,6 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
 // Nested variograms
 // ---------------------------------------------------------------------------
 
-/// Parameters for a single variogram component, used when building nested variograms.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NestedComponent {
-    variogram_type: String,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    #[serde(default)]
-    shape: Option<f64>,
-    /// Second shape parameter, consulted only by two-shape families (Confluent
-    /// Hypergeometric tail-decay `alpha`). Ignored for other model types.
-    #[serde(default)]
-    shape2: Option<f64>,
-}
-
 /// Evaluate a nested (additive) variogram at a list of distances. Returns
 /// `{ distances, semivariances, covariances }` — semivariance and covariance per lag.
 ///
@@ -2784,7 +2559,7 @@ pub fn wasm_evaluate_nested_variogram(
     components: JsValue,
     distances: &[f64],
 ) -> Result<JsValue, JsValue> {
-    let comps: Vec<NestedComponent> =
+    let comps: Vec<VariogramSpec> =
         serde_wasm_bindgen::from_value(components).map_err(err_to_js)?;
     if comps.is_empty() {
         return Err(coded_err(
@@ -2794,15 +2569,7 @@ pub fn wasm_evaluate_nested_variogram(
     }
     let mut models = Vec::with_capacity(comps.len());
     for c in &comps {
-        let m = parse_variogram_with_shape2(
-            &c.variogram_type,
-            c.nugget,
-            c.sill,
-            c.range,
-            c.shape,
-            c.shape2,
-        )?;
-        models.push(m);
+        models.push(spec_to_model(c)?);
     }
     let nested = NestedVariogram::new(models).map_err(kriging_err_to_js)?;
     let semivariances: Vec<f64> = distances

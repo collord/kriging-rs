@@ -9,6 +9,7 @@
 #![allow(clippy::unnecessary_cast)]
 
 use js_sys::{Float64Array, Object};
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 use crate::BinomialBuildNotes;
@@ -23,6 +24,7 @@ use crate::spacetime::{
     SpaceTimeVariogramConfig, SpaceTimeVariogramType, compute_empirical_spacetime_variogram,
     fit_spacetime_variogram,
 };
+use crate::variogram::VariogramSpec;
 use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal};
 use crate::variogram::models::{VariogramModel, VariogramType};
 
@@ -30,58 +32,54 @@ use super::{
     JsBinomialPrediction, JsPrediction, binomial_cv_result_to_js, binomial_many_simulation_to_js,
     binomial_simulation_to_js, coded_err, cv_result_to_js, err_to_js, kriging_err_to_js,
     map_binomial_predictions, map_predictions, parse_binomial_prior, parse_simulation_options,
-    parse_variogram_with_shape2, set_object_field, split_binomial_predictions, split_predictions,
+    set_object_field, spec_to_model, split_binomial_predictions, split_predictions,
 };
 
 const FAMILY_HELP: &str = "family must be 'separable' or 'productSum'";
 
-fn parse_spacetime_variogram(
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
+/// Space-time variogram description carried as one (de)serializable object.
+///
+/// `spatial` and `temporal` are each a [`VariogramSpec`]; `family` selects the space-time
+/// construction (`separable` or `productSum`), and `k1`/`k2`/`k3` are the product-sum weights.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpaceTimeVariogramSpec {
+    family: String,
+    spatial: VariogramSpec,
+    temporal: VariogramSpec,
+    #[serde(default)]
     k1: Option<f64>,
+    #[serde(default)]
     k2: Option<f64>,
+    #[serde(default)]
     k3: Option<f64>,
-) -> Result<SpaceTimeVariogram, JsValue> {
-    let spatial = parse_variogram_with_shape2(
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-    )?;
-    let temporal = parse_variogram_with_shape2(
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-    )?;
-    match family.to_ascii_lowercase().as_str() {
-        "separable" => {
-            SpaceTimeVariogram::new_separable(spatial, temporal).map_err(kriging_err_to_js)
+}
+
+impl SpaceTimeVariogramSpec {
+    fn build(&self) -> Result<SpaceTimeVariogram, JsValue> {
+        let spatial = spec_to_model(&self.spatial)?;
+        let temporal = spec_to_model(&self.temporal)?;
+        match self.family.to_ascii_lowercase().as_str() {
+            "separable" => {
+                SpaceTimeVariogram::new_separable(spatial, temporal).map_err(kriging_err_to_js)
+            }
+            "product_sum" | "productsum" | "product-sum" => {
+                let k1 = self.k1.unwrap_or(1.0) as Real;
+                let k2 = self.k2.unwrap_or(0.0) as Real;
+                let k3 = self.k3.unwrap_or(0.0) as Real;
+                SpaceTimeVariogram::new_product_sum(spatial, temporal, k1, k2, k3)
+                    .map_err(kriging_err_to_js)
+            }
+            _ => Err(coded_err(FAMILY_HELP, "unknown_family")),
         }
-        "product_sum" | "productsum" | "product-sum" => {
-            let k1 = k1.unwrap_or(1.0) as Real;
-            let k2 = k2.unwrap_or(0.0) as Real;
-            let k3 = k3.unwrap_or(0.0) as Real;
-            SpaceTimeVariogram::new_product_sum(spatial, temporal, k1, k2, k3)
-                .map_err(kriging_err_to_js)
-        }
-        _ => Err(coded_err(FAMILY_HELP, "unknown_family")),
     }
+}
+
+/// Deserialize a JS space-time variogram spec object and build the model.
+fn spacetime_variogram_from_js(variogram: JsValue) -> Result<SpaceTimeVariogram, JsValue> {
+    let spec: SpaceTimeVariogramSpec =
+        serde_wasm_bindgen::from_value(variogram).map_err(err_to_js)?;
+    spec.build()
 }
 
 fn parse_universal_trend(name: &str) -> Result<SpaceTimeUniversalTrend, JsValue> {
@@ -244,42 +242,10 @@ impl WasmSpaceTimeOrdinaryKriging {
         lons: &[f64],
         times: &[f64],
         values: &[f64],
-        family: &str,
-        spatial_type: &str,
-        spatial_nugget: f64,
-        spatial_sill: f64,
-        spatial_range: f64,
-        spatial_shape: Option<f64>,
-        spatial_shape2: Option<f64>,
-        temporal_type: &str,
-        temporal_nugget: f64,
-        temporal_sill: f64,
-        temporal_range: f64,
-        temporal_shape: Option<f64>,
-        temporal_shape2: Option<f64>,
-        k1: Option<f64>,
-        k2: Option<f64>,
-        k3: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSpaceTimeOrdinaryKriging, JsValue> {
         let dataset = build_geo_dataset(lats, lons, times, values)?;
-        let variogram = parse_spacetime_variogram(
-            family,
-            spatial_type,
-            spatial_nugget,
-            spatial_sill,
-            spatial_range,
-            spatial_shape,
-            spatial_shape2,
-            temporal_type,
-            temporal_nugget,
-            temporal_sill,
-            temporal_range,
-            temporal_shape,
-            temporal_shape2,
-            k1,
-            k2,
-            k3,
-        )?;
+        let variogram = spacetime_variogram_from_js(variogram)?;
         let inner = SpaceTimeOrdinaryKrigingModel::new(GeoMetric, dataset, variogram)
             .map_err(kriging_err_to_js)?;
         Ok(Self { inner })
@@ -355,42 +321,10 @@ impl WasmSpaceTimeSimpleKriging {
         times: &[f64],
         values: &[f64],
         mean: f64,
-        family: &str,
-        spatial_type: &str,
-        spatial_nugget: f64,
-        spatial_sill: f64,
-        spatial_range: f64,
-        spatial_shape: Option<f64>,
-        spatial_shape2: Option<f64>,
-        temporal_type: &str,
-        temporal_nugget: f64,
-        temporal_sill: f64,
-        temporal_range: f64,
-        temporal_shape: Option<f64>,
-        temporal_shape2: Option<f64>,
-        k1: Option<f64>,
-        k2: Option<f64>,
-        k3: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSpaceTimeSimpleKriging, JsValue> {
         let dataset = build_geo_dataset(lats, lons, times, values)?;
-        let variogram = parse_spacetime_variogram(
-            family,
-            spatial_type,
-            spatial_nugget,
-            spatial_sill,
-            spatial_range,
-            spatial_shape,
-            spatial_shape2,
-            temporal_type,
-            temporal_nugget,
-            temporal_sill,
-            temporal_range,
-            temporal_shape,
-            temporal_shape2,
-            k1,
-            k2,
-            k3,
-        )?;
+        let variogram = spacetime_variogram_from_js(variogram)?;
         let inner = SpaceTimeSimpleKrigingModel::new(GeoMetric, dataset, variogram, mean as Real)
             .map_err(kriging_err_to_js)?;
         Ok(Self { inner })
@@ -451,42 +385,10 @@ impl WasmSpaceTimeUniversalKriging {
         times: &[f64],
         values: &[f64],
         trend: &str,
-        family: &str,
-        spatial_type: &str,
-        spatial_nugget: f64,
-        spatial_sill: f64,
-        spatial_range: f64,
-        spatial_shape: Option<f64>,
-        spatial_shape2: Option<f64>,
-        temporal_type: &str,
-        temporal_nugget: f64,
-        temporal_sill: f64,
-        temporal_range: f64,
-        temporal_shape: Option<f64>,
-        temporal_shape2: Option<f64>,
-        k1: Option<f64>,
-        k2: Option<f64>,
-        k3: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSpaceTimeUniversalKriging, JsValue> {
         let dataset = build_geo_dataset(lats, lons, times, values)?;
-        let variogram = parse_spacetime_variogram(
-            family,
-            spatial_type,
-            spatial_nugget,
-            spatial_sill,
-            spatial_range,
-            spatial_shape,
-            spatial_shape2,
-            temporal_type,
-            temporal_nugget,
-            temporal_sill,
-            temporal_range,
-            temporal_shape,
-            temporal_shape2,
-            k1,
-            k2,
-            k3,
-        )?;
+        let variogram = spacetime_variogram_from_js(variogram)?;
         let trend = parse_universal_trend(trend)?;
         let inner = SpaceTimeUniversalKrigingModel::new(GeoMetric, dataset, variogram, trend)
             .map_err(kriging_err_to_js)?;
@@ -549,22 +451,7 @@ impl WasmSpaceTimeBinomialKriging {
         times: &[f64],
         successes: &[u32],
         trials: &[u32],
-        family: &str,
-        spatial_type: &str,
-        spatial_nugget: f64,
-        spatial_sill: f64,
-        spatial_range: f64,
-        spatial_shape: Option<f64>,
-        spatial_shape2: Option<f64>,
-        temporal_type: &str,
-        temporal_nugget: f64,
-        temporal_sill: f64,
-        temporal_range: f64,
-        temporal_shape: Option<f64>,
-        temporal_shape2: Option<f64>,
-        k1: Option<f64>,
-        k2: Option<f64>,
-        k3: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSpaceTimeBinomialKriging, JsValue> {
         if lats.len() != lons.len()
             || lats.len() != times.len()
@@ -597,24 +484,7 @@ impl WasmSpaceTimeBinomialKriging {
                 "insufficient_data",
             ));
         }
-        let variogram = parse_spacetime_variogram(
-            family,
-            spatial_type,
-            spatial_nugget,
-            spatial_sill,
-            spatial_range,
-            spatial_shape,
-            spatial_shape2,
-            temporal_type,
-            temporal_nugget,
-            temporal_sill,
-            temporal_range,
-            temporal_shape,
-            temporal_shape2,
-            k1,
-            k2,
-            k3,
-        )?;
+        let variogram = spacetime_variogram_from_js(variogram)?;
         let fit = SpaceTimeBinomialKrigingModel::new(GeoMetric, observations, variogram)
             .map_err(kriging_err_to_js)?;
         let mut build_notes = fit.notes;
@@ -714,42 +584,10 @@ impl WasmSpaceTimeOrdinaryProjectedKriging {
         values: &[f64],
         major_angle_deg: f64,
         range_ratio: f64,
-        family: &str,
-        spatial_type: &str,
-        spatial_nugget: f64,
-        spatial_sill: f64,
-        spatial_range: f64,
-        spatial_shape: Option<f64>,
-        spatial_shape2: Option<f64>,
-        temporal_type: &str,
-        temporal_nugget: f64,
-        temporal_sill: f64,
-        temporal_range: f64,
-        temporal_shape: Option<f64>,
-        temporal_shape2: Option<f64>,
-        k1: Option<f64>,
-        k2: Option<f64>,
-        k3: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSpaceTimeOrdinaryProjectedKriging, JsValue> {
         let dataset = build_projected_dataset(xs, ys, times, values)?;
-        let variogram = parse_spacetime_variogram(
-            family,
-            spatial_type,
-            spatial_nugget,
-            spatial_sill,
-            spatial_range,
-            spatial_shape,
-            spatial_shape2,
-            temporal_type,
-            temporal_nugget,
-            temporal_sill,
-            temporal_range,
-            temporal_shape,
-            temporal_shape2,
-            k1,
-            k2,
-            k3,
-        )?;
+        let variogram = spacetime_variogram_from_js(variogram)?;
         let metric = projected_metric(major_angle_deg, range_ratio)?;
         let inner = SpaceTimeOrdinaryKrigingModel::new(metric, dataset, variogram)
             .map_err(kriging_err_to_js)?;
@@ -1014,44 +852,6 @@ fn st_build_geo_coords(
     Ok(out)
 }
 
-fn st_parse_spacetime_variogram_all(
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
-) -> Result<SpaceTimeVariogram, JsValue> {
-    parse_spacetime_variogram(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )
-}
-
 /// Leave-one-out CV for space-time ordinary kriging on geographic coordinates.
 #[wasm_bindgen(js_name = leaveOneOutSpaceTime)]
 pub fn wasm_leave_one_out_spacetime(
@@ -1059,22 +859,7 @@ pub fn wasm_leave_one_out_spacetime(
     lons: &[f64],
     times: &[f64],
     values: &[f64],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1084,24 +869,7 @@ pub fn wasm_leave_one_out_spacetime(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let residuals = crate::cv::leave_one_out_spacetime(GeoMetric, &coords, &values_real, vg)
         .map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
@@ -1115,22 +883,7 @@ pub fn wasm_k_fold_spacetime(
     times: &[f64],
     values: &[f64],
     k: usize,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1140,24 +893,7 @@ pub fn wasm_k_fold_spacetime(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let residuals = crate::cv::k_fold_spacetime(GeoMetric, &coords, &values_real, vg, k)
         .map_err(kriging_err_to_js)?;
     cv_result_to_js(residuals)
@@ -1171,22 +907,7 @@ pub fn wasm_leave_one_out_spacetime_simple(
     times: &[f64],
     values: &[f64],
     mean: f64,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1196,24 +917,7 @@ pub fn wasm_leave_one_out_spacetime_simple(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let residuals = crate::cv::leave_one_out_spacetime_simple(
         GeoMetric,
         &coords,
@@ -1234,22 +938,7 @@ pub fn wasm_k_fold_spacetime_simple(
     values: &[f64],
     mean: f64,
     k: usize,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1259,24 +948,7 @@ pub fn wasm_k_fold_spacetime_simple(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let residuals =
         crate::cv::k_fold_spacetime_simple(GeoMetric, &coords, &values_real, vg, mean as Real, k)
             .map_err(kriging_err_to_js)?;
@@ -1291,22 +963,7 @@ pub fn wasm_leave_one_out_spacetime_universal(
     times: &[f64],
     values: &[f64],
     trend: &str,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1316,24 +973,7 @@ pub fn wasm_leave_one_out_spacetime_universal(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let trend = parse_universal_trend(trend)?;
     let residuals =
         crate::cv::leave_one_out_spacetime_universal(GeoMetric, &coords, &values_real, vg, trend)
@@ -1350,22 +990,7 @@ pub fn wasm_k_fold_spacetime_universal(
     values: &[f64],
     trend: &str,
     k: usize,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
 ) -> Result<JsValue, JsValue> {
     if values.len() != lats.len() {
         return Err(coded_err(
@@ -1375,24 +1000,7 @@ pub fn wasm_k_fold_spacetime_universal(
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let trend = parse_universal_trend(trend)?;
     let residuals =
         crate::cv::k_fold_spacetime_universal(GeoMetric, &coords, &values_real, vg, trend, k)
@@ -1408,22 +1016,7 @@ pub fn wasm_leave_one_out_spacetime_binomial(
     times: &[f64],
     successes: &[u32],
     trials: &[u32],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -1438,24 +1031,7 @@ pub fn wasm_leave_one_out_spacetime_binomial(
         ));
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let residuals = crate::cv::leave_one_out_spacetime_binomial(
         GeoMetric, &coords, successes, trials, vg, prior,
@@ -1473,22 +1049,7 @@ pub fn wasm_k_fold_spacetime_binomial(
     successes: &[u32],
     trials: &[u32],
     k: usize,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
 ) -> Result<JsValue, JsValue> {
@@ -1503,24 +1064,7 @@ pub fn wasm_k_fold_spacetime_binomial(
         ));
     }
     let coords = st_build_geo_coords(lats, lons, times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let residuals =
         crate::cv::k_fold_spacetime_binomial(GeoMetric, &coords, successes, trials, vg, prior, k)
@@ -1543,22 +1087,7 @@ pub fn wasm_conditional_simulate_spacetime(
     target_lats: &[f64],
     target_lons: &[f64],
     target_times: &[f64],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -1572,24 +1101,7 @@ pub fn wasm_conditional_simulate_spacetime(
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = crate::simulation::conditional_simulate_spacetime(
         GeoMetric,
@@ -1615,22 +1127,7 @@ pub fn wasm_conditional_simulate_spacetime_simple(
     target_lons: &[f64],
     target_times: &[f64],
     mean: f64,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -1644,24 +1141,7 @@ pub fn wasm_conditional_simulate_spacetime_simple(
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = crate::simulation::conditional_simulate_spacetime_simple(
         GeoMetric,
@@ -1688,22 +1168,7 @@ pub fn wasm_conditional_simulate_spacetime_universal(
     target_lons: &[f64],
     target_times: &[f64],
     trend: &str,
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     seed: u64,
     target_order: Option<Vec<u32>>,
 ) -> Result<JsValue, JsValue> {
@@ -1717,24 +1182,7 @@ pub fn wasm_conditional_simulate_spacetime_universal(
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let trend = parse_universal_trend(trend)?;
     let options = parse_simulation_options(seed, target_order);
     let samples = crate::simulation::conditional_simulate_spacetime_universal(
@@ -1763,22 +1211,7 @@ pub fn wasm_conditional_simulate_spacetime_binomial(
     target_lats: &[f64],
     target_lons: &[f64],
     target_times: &[f64],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     seed: u64,
@@ -1797,24 +1230,7 @@ pub fn wasm_conditional_simulate_spacetime_binomial(
     let cond_coords =
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let options = parse_simulation_options(seed, target_order);
     let result = crate::simulation::conditional_simulate_spacetime_binomial(
@@ -1844,22 +1260,7 @@ pub fn wasm_conditional_simulate_spacetime_many(
     target_lats: &[f64],
     target_lons: &[f64],
     target_times: &[f64],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     n_realizations: u32,
     base_seed: u64,
     target_order: Option<Vec<u32>>,
@@ -1874,24 +1275,7 @@ pub fn wasm_conditional_simulate_spacetime_many(
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let samples = crate::simulation::conditional_simulate_many_spacetime(
         GeoMetric,
@@ -1923,22 +1307,7 @@ pub fn wasm_conditional_simulate_spacetime_many_binomial(
     target_lats: &[f64],
     target_lons: &[f64],
     target_times: &[f64],
-    family: &str,
-    spatial_type: &str,
-    spatial_nugget: f64,
-    spatial_sill: f64,
-    spatial_range: f64,
-    spatial_shape: Option<f64>,
-    spatial_shape2: Option<f64>,
-    temporal_type: &str,
-    temporal_nugget: f64,
-    temporal_sill: f64,
-    temporal_range: f64,
-    temporal_shape: Option<f64>,
-    temporal_shape2: Option<f64>,
-    k1: Option<f64>,
-    k2: Option<f64>,
-    k3: Option<f64>,
+    variogram: JsValue,
     prior_alpha: Option<f64>,
     prior_beta: Option<f64>,
     n_realizations: u32,
@@ -1958,24 +1327,7 @@ pub fn wasm_conditional_simulate_spacetime_many_binomial(
     let cond_coords =
         st_build_geo_coords(conditioning_lats, conditioning_lons, conditioning_times)?;
     let targets = st_build_geo_coords(target_lats, target_lons, target_times)?;
-    let vg = st_parse_spacetime_variogram_all(
-        family,
-        spatial_type,
-        spatial_nugget,
-        spatial_sill,
-        spatial_range,
-        spatial_shape,
-        spatial_shape2,
-        temporal_type,
-        temporal_nugget,
-        temporal_sill,
-        temporal_range,
-        temporal_shape,
-        temporal_shape2,
-        k1,
-        k2,
-        k3,
-    )?;
+    let vg = spacetime_variogram_from_js(variogram)?;
     let prior = parse_binomial_prior(prior_alpha, prior_beta)?;
     let order = target_order.map(|v| v.into_iter().map(|x| x as usize).collect());
     let result = crate::simulation::conditional_simulate_many_spacetime_binomial(

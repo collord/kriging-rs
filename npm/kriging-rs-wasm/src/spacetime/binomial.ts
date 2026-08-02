@@ -17,7 +17,6 @@ import {
 import { requireLoadedModule } from "../internal/module.js";
 import {
   fittedToSpaceTimeVariogramParams,
-  packSpaceTimeVariogram,
 } from "../internal/spacetime.js";
 import { timesFromDates } from "../time.js";
 import type { WasmSpaceTimeBinomialInstance } from "../internal/wasm-shapes.js";
@@ -53,7 +52,6 @@ export class SpaceTimeBinomialKriging {
         { code: "backend_unavailable" }
       );
     }
-    const packed = packSpaceTimeVariogram(options.variogram);
     try {
       this.inner = ctor.fromArrays(
         toFloat64Array(options.lats),
@@ -61,22 +59,7 @@ export class SpaceTimeBinomialKriging {
         toFloat64Array(options.times),
         toUint32Array(options.successes),
         toUint32Array(options.trials),
-        packed.family,
-        packed.spatialType,
-        packed.spatialNugget,
-        packed.spatialSill,
-        packed.spatialRange,
-        packed.spatialShape,
-        packed.spatialShape2,
-        packed.temporalType,
-        packed.temporalNugget,
-        packed.temporalSill,
-        packed.temporalRange,
-        packed.temporalShape,
-        packed.temporalShape2,
-        packed.k1,
-        packed.k2,
-        packed.k3
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);

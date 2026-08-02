@@ -54,11 +54,7 @@ export class ProjectedKriging {
         toFloat64Array(options.xs),
         toFloat64Array(options.ys),
         toFloat64Array(options.values),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape,
+        options.variogram,
         options.majorAngleDeg,
         options.rangeRatio
       );

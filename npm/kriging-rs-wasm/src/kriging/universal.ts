@@ -54,11 +54,7 @@ export class UniversalKriging {
         toFloat64Array(options.lons),
         toFloat64Array(options.values),
         options.trend,
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);
