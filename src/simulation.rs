@@ -39,6 +39,9 @@
 
 use crate::Real;
 use crate::cokriging::collocated::{CollocatedCokrigingModel, SecondaryVariable};
+use crate::cokriging::coregionalization::Coregionalization;
+use crate::cokriging::dataset::MultiVariableSamples;
+use crate::cokriging::model::{CokrigingKind, CokrigingModel};
 use crate::distance::GeoCoord;
 use crate::error::KrigingError;
 use crate::geo_dataset::GeoDataset;
@@ -643,6 +646,104 @@ pub fn collocated_cosimulate(
     }
 
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Multivariate cosimulation (full LMC)
+// ---------------------------------------------------------------------------
+
+/// Result of a multivariate cosimulation: one realization per variable at the target locations,
+/// in the **original** target input order.
+#[derive(Debug, Clone)]
+pub struct CosimulationResult {
+    /// Number of variables `p`.
+    pub n_variables: usize,
+    /// Number of target locations.
+    pub n_targets: usize,
+    /// `samples[v][i]` is the simulated value of variable `v` at target `i`.
+    pub samples: Vec<Vec<Real>>,
+}
+
+/// Sequential Gaussian **cosimulation** of several variables jointly, honoring their auto- and
+/// cross-covariances through a full Linear Model of Coregionalization ([`Coregionalization`]).
+///
+/// Simple-cokriging based (known per-variable `means`), assuming the variables are jointly
+/// Gaussian. Every variable is simulated at **all** `targets`. Visiting the targets in the chosen
+/// order, at each target every variable is drawn in turn from `N(ẑ, σ²̂)` where `ẑ`, `σ²̂` come
+/// from cokriging that variable against the current conditioning set — the original data **plus**
+/// every value simulated so far, including earlier variables at the same node (which honors the
+/// lag-zero cross-correlation). Each draw is appended to the conditioning set before the next.
+///
+/// The conditioning set is heterotopic during a node's sweep, which is why this builds on
+/// [`CokrigingModel::new_heterotopic`]. Each conditioning variable must start with at least one
+/// sample.
+///
+/// Cost note: a cokriging system is rebuilt and factorized at **every** `(target, variable)`
+/// step, so this is `O(n_targets · p · (Σn)³)` — fine for modest problems; large grids want an
+/// incremental scheme (future work).
+///
+/// Errors: variable-count disagreements between `samples`, `coregionalization`, and `means`
+/// ([`KrigingError::DimensionMismatch`]); an invalid `target_order`; or any underlying cokriging
+/// failure.
+pub fn cosimulate(
+    samples: MultiVariableSamples,
+    coregionalization: Coregionalization,
+    means: Vec<Real>,
+    targets: &[GeoCoord],
+    options: SimulationOptions,
+) -> Result<CosimulationResult, KrigingError> {
+    let p = samples.n_variables();
+    if coregionalization.n_variables() != p {
+        return Err(KrigingError::DimensionMismatch(format!(
+            "coregionalization has {} variables but samples have {p}",
+            coregionalization.n_variables()
+        )));
+    }
+    if means.len() != p {
+        return Err(KrigingError::DimensionMismatch(format!(
+            "means has {} entries but there are {p} variables",
+            means.len()
+        )));
+    }
+    let n_targets = targets.len();
+    let order = resolve_target_order(n_targets, options.target_order)?;
+
+    // Mutable heterotopic conditioning pool, seeded with the data.
+    let mut cond_coords: Vec<Vec<GeoCoord>> = (0..p).map(|v| samples.coords(v).to_vec()).collect();
+    let mut cond_values: Vec<Vec<Real>> = (0..p).map(|v| samples.values(v).to_vec()).collect();
+
+    let mut rng = Rng::new(options.seed);
+    let mut out: Vec<Vec<Real>> = vec![vec![0.0 as Real; n_targets]; p];
+
+    for &target_idx in &order {
+        let target = targets[target_idx];
+        for v in 0..p {
+            let pool = MultiVariableSamples::new(
+                (0..p)
+                    .map(|w| (cond_coords[w].clone(), cond_values[w].clone()))
+                    .collect(),
+            )?;
+            let model = CokrigingModel::new_heterotopic(
+                pool,
+                coregionalization.clone(),
+                CokrigingKind::Simple {
+                    means: means.clone(),
+                },
+            )?;
+            let pred = model.predict(v, target)?;
+            let sigma = pred.variance.max(0.0).sqrt();
+            let sampled = pred.value + sigma * rng.next_standard_normal();
+            out[v][target_idx] = sampled;
+            cond_coords[v].push(target);
+            cond_values[v].push(sampled);
+        }
+    }
+
+    Ok(CosimulationResult {
+        n_variables: p,
+        n_targets,
+        samples: out,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1318,6 +1419,93 @@ mod tests {
                 vg,
                 2.5,
                 sec,
+                SimulationOptions::new(1)
+            )
+            .is_err()
+        );
+    }
+
+    // ---- Multivariate cosimulation ----------------------------------------
+
+    fn cosim_setup() -> (MultiVariableSamples, Coregionalization, Vec<Real>) {
+        use crate::cokriging::{CoregionalizationStructure, CorrelationBasis, SillMatrix};
+        let coords = vec![
+            GeoCoord::try_new(0.0, 0.0).unwrap(),
+            GeoCoord::try_new(0.0, 1.0).unwrap(),
+            GeoCoord::try_new(1.0, 0.0).unwrap(),
+            GeoCoord::try_new(1.0, 1.0).unwrap(),
+        ];
+        let primary = vec![10.0, 12.0, 11.0, 13.0];
+        let secondary = vec![1.0, 2.2, 1.1, 2.9];
+        let samples =
+            MultiVariableSamples::new(vec![(coords.clone(), primary), (coords, secondary)])
+                .unwrap();
+        let shape = VariogramModel::new(0.0, 1.0, 300.0, VariogramType::Exponential).unwrap();
+        let coreg = Coregionalization::new(vec![CoregionalizationStructure::new(
+            CorrelationBasis::Model(shape),
+            SillMatrix::from_rows(vec![vec![2.0, 0.9], vec![0.9, 1.0]]).unwrap(),
+        )])
+        .unwrap();
+        (samples, coreg, vec![11.5, 1.8])
+    }
+
+    #[test]
+    fn cosimulate_is_deterministic_and_shaped() {
+        let (samples, coreg, means) = cosim_setup();
+        let targets = vec![
+            GeoCoord::try_new(0.5, 0.5).unwrap(),
+            GeoCoord::try_new(0.25, 0.75).unwrap(),
+        ];
+        let a = cosimulate(
+            samples.clone(),
+            coreg.clone(),
+            means.clone(),
+            &targets,
+            SimulationOptions::new(7),
+        )
+        .unwrap();
+        let b = cosimulate(samples, coreg, means, &targets, SimulationOptions::new(7)).unwrap();
+        assert_eq!(a.n_variables, 2);
+        assert_eq!(a.n_targets, 2);
+        assert_eq!(a.samples.len(), 2);
+        assert_eq!(a.samples[0].len(), 2);
+        assert_eq!(a.samples, b.samples, "same seed → identical realization");
+        for row in &a.samples {
+            for x in row {
+                assert!(x.is_finite());
+            }
+        }
+    }
+
+    #[test]
+    fn cosimulate_honors_conditioning_at_coincident_target() {
+        let (samples, coreg, means) = cosim_setup();
+        // Target coincides with the first sample location; the simulated values there should be
+        // very close to the observed data (near-zero cokriging variance).
+        let targets = vec![GeoCoord::try_new(0.0, 0.0).unwrap()];
+        let out = cosimulate(samples, coreg, means, &targets, SimulationOptions::new(3)).unwrap();
+        assert!(
+            (out.samples[0][0] - 10.0).abs() < 0.3,
+            "primary at data location should be ~10.0, got {}",
+            out.samples[0][0]
+        );
+        assert!(
+            (out.samples[1][0] - 1.0).abs() < 0.3,
+            "secondary at data location should be ~1.0, got {}",
+            out.samples[1][0]
+        );
+    }
+
+    #[test]
+    fn cosimulate_rejects_bad_means_length() {
+        let (samples, coreg, _means) = cosim_setup();
+        let targets = vec![GeoCoord::try_new(0.5, 0.5).unwrap()];
+        assert!(
+            cosimulate(
+                samples,
+                coreg,
+                vec![1.0],
+                &targets,
                 SimulationOptions::new(1)
             )
             .is_err()

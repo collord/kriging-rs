@@ -135,8 +135,8 @@ pub mod wasm;
 pub use anisotropy_3d::Anisotropy3D;
 pub use cokriging::{
     CokrigingKind, CokrigingModel, CollocatedCokrigingModel, Coregionalization,
-    CoregionalizationStructure, CorrelationBasis, MultiVariableDataset, SecondaryVariable,
-    SillMatrix,
+    CoregionalizationStructure, CorrelationBasis, MultiVariableDataset, MultiVariableSamples,
+    SecondaryVariable, SillMatrix,
 };
 pub use coord_3d::{Coord3D, Orientation, euclidean_distance_3d, euclidean_distance_3d_squared};
 pub use distance::GeoCoord;

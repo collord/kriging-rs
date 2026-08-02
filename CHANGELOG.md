@@ -80,13 +80,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Full block cokriging.** `CokrigingModel` performs simple or ordinary (`CokrigingKind`)
     cokriging of any target variable using all variables' data, driven by a `Coregionalization`
     (a Linear Model of Coregionalization: `CorrelationBasis` structures weighted by
-    PSD-validated `SillMatrix` sill matrices). The `p·n × p·n` block system is factorized once
-    and reused across target variables and locations; it reduces exactly to univariate kriging
-    for one variable and ignores an uncorrelated secondary. Inputs come as a
-    (isotopic) `MultiVariableDataset`.
+    PSD-validated `SillMatrix` sill matrices). The block system is factorized once and reused
+    across target variables and locations; it reduces exactly to univariate kriging for one
+    variable and ignores an uncorrelated secondary. Variables may share locations (isotopic —
+    `MultiVariableDataset`, `CokrigingModel::new`) or be sampled at different places
+    (heterotopic — `MultiVariableSamples`, `CokrigingModel::new_heterotopic`), the latter being
+    how a sparse primary borrows strength from a dense secondary.
+  - **Multivariate sequential cosimulation.** `simulation::cosimulate` draws joint conditional
+    realizations of all variables honoring the full LMC, simulating each variable at each node
+    from its cokriging distribution against the data and everything simulated so far.
 
-  Heterotopic data, multivariate sequential cosimulation, and LMC auto-fitting are not yet
-  included (supply the coregionalization directly). See `examples/collocated_cokriging.rs`.
+  LMC auto-fitting is not yet included (supply the coregionalization directly).
+  See `examples/collocated_cokriging.rs`.
 
 ### Fixed
 

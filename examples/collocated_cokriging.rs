@@ -5,9 +5,9 @@
 
 use kriging_rs::cokriging::{
     CokrigingKind, CokrigingModel, Coregionalization, CoregionalizationStructure, CorrelationBasis,
-    MultiVariableDataset, SillMatrix,
+    MultiVariableDataset, MultiVariableSamples, SillMatrix,
 };
-use kriging_rs::simulation::{SimulationOptions, collocated_cosimulate};
+use kriging_rs::simulation::{SimulationOptions, collocated_cosimulate, cosimulate};
 use kriging_rs::{
     CollocatedCokrigingModel, GeoCoord, GeoDataset, SecondaryVariable, VariogramModel,
     VariogramType,
@@ -103,6 +103,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "block ordinary cokriging (var 0): value={:.3}, variance={:.6}",
         ck.value, ck.variance
+    );
+
+    // --- Heterotopic cokriging: a sparse primary + a denser secondary, sampled elsewhere. ---
+    let primary_sites = vec![
+        GeoCoord::try_new(37.77, -122.42)?,
+        GeoCoord::try_new(37.75, -122.43)?,
+    ];
+    let secondary_sites = vec![
+        GeoCoord::try_new(37.78, -122.41)?,
+        GeoCoord::try_new(37.76, -122.40)?,
+        GeoCoord::try_new(37.765, -122.415)?,
+    ];
+    let hetero = MultiVariableSamples::new(vec![
+        (primary_sites, vec![15.0, 13.0]),
+        (secondary_sites, vec![2.9, 1.8, 2.4]),
+    ])?;
+    let coreg = Coregionalization::new(vec![CoregionalizationStructure::new(
+        CorrelationBasis::Model(VariogramModel::new(
+            0.0,
+            1.0,
+            5.0,
+            VariogramType::Exponential,
+        )?),
+        SillMatrix::from_rows(vec![vec![6.0, 1.4], vec![1.4, 0.5]])?,
+    )])?;
+    let het_model =
+        CokrigingModel::new_heterotopic(hetero.clone(), coreg.clone(), CokrigingKind::Ordinary)?;
+    let het_pred = het_model.predict(0, target)?;
+    println!(
+        "heterotopic cokriging (sparse primary): value={:.3}, variance={:.6}",
+        het_pred.value, het_pred.variance
+    );
+
+    // --- Multivariate cosimulation: joint realization of both variables at new locations. ---
+    let cosim_targets = vec![
+        GeoCoord::try_new(37.765, -122.42)?,
+        GeoCoord::try_new(37.77, -122.41)?,
+    ];
+    let cosim = cosimulate(
+        hetero,
+        coreg,
+        vec![14.0, 2.3], // per-variable means
+        &cosim_targets,
+        SimulationOptions::new(7),
+    )?;
+    println!(
+        "cosimulated primary:   {:?}\ncosimulated secondary: {:?}",
+        cosim.samples[0], cosim.samples[1]
     );
 
     Ok(())

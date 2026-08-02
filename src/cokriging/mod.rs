@@ -16,19 +16,23 @@
 //!   performs simple or ordinary cokriging of any target variable using **all** variables'
 //!   data, driven by a [`Coregionalization`] — a sum of [`CorrelationBasis`] structures each
 //!   weighted by a positive-semidefinite [`SillMatrix`], giving every cross-covariance
-//!   `C_ij(h)`. The `p·n × p·n` block system is factorized once and reused across target
-//!   variables and locations. It reduces exactly to univariate kriging when there is one
-//!   variable, and ignores an uncorrelated secondary. Inputs come as a [`MultiVariableDataset`]
-//!   (isotopic — all variables sampled at the same locations). MM1 collocated cokriging is the
-//!   special case of a single intrinsic structure with a `2 × 2` sill matrix, so the two APIs
-//!   describe one family of models.
+//!   `C_ij(h)`. The block system is factorized once and reused across target variables and
+//!   locations. It reduces exactly to univariate kriging when there is one variable, and ignores
+//!   an uncorrelated secondary. Variables may share locations (isotopic —
+//!   [`MultiVariableDataset`], via [`CokrigingModel::new`]) or be sampled at *different* places
+//!   (heterotopic — [`MultiVariableSamples`], via [`CokrigingModel::new_heterotopic`]); the
+//!   latter is how a sparse primary borrows strength from a dense secondary. MM1 collocated
+//!   cokriging is the special case of a single intrinsic structure with a `2 × 2` sill matrix,
+//!   so the two approaches describe one family of models.
+//!
+//! - **Multivariate sequential cosimulation.**
+//!   [`cosimulate`](crate::simulation::cosimulate) draws joint conditional realizations of all
+//!   variables honoring the full LMC — simulating each variable at each node from its cokriging
+//!   distribution against the data and everything simulated so far (heterotopic during a node's
+//!   sweep, which is why it builds on [`CokrigingModel::new_heterotopic`]).
 //!
 //! ## Not yet
 //!
-//! - **Heterotopic data** (variables sampled at *different* locations) — the block assembly is
-//!   currently square (isotopic). Heterotopic support is the enabler for the next item.
-//! - **Multivariate sequential cosimulation** (joint SGS over several variables) — needs the
-//!   heterotopic path, because simulated nodes are heterotopic during a within-node sweep.
 //! - **LMC auto-fitting** (e.g. Goulard–Voltz) — for now, supply the [`Coregionalization`]
 //!   directly; its sill matrices are admissibility-checked at construction.
 
@@ -41,5 +45,5 @@ pub use collocated::{CollocatedCokrigingModel, SecondaryVariable};
 pub use coregionalization::{
     Coregionalization, CoregionalizationStructure, CorrelationBasis, SillMatrix,
 };
-pub use dataset::MultiVariableDataset;
+pub use dataset::{MultiVariableDataset, MultiVariableSamples};
 pub use model::{CokrigingKind, CokrigingModel};
