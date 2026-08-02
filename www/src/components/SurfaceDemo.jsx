@@ -14,6 +14,7 @@ import {
   summarizePhaseShares,
 } from "../lib/sampleData";
 import { computeEmpiricalVariogram } from "../lib/variogram";
+import HelpTip, { FieldLabel } from "./HelpTip";
 import {
   drawSurfacePlaceholder,
   drawResidualPlaceholder,
@@ -419,7 +420,10 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
 
   return (
     <div className="panel">
-      <h2>2D Surface demo</h2>
+      <h2>
+        2D Surface demo
+        <HelpTip topic="surfaceSection" label="2D Surface demo" />
+      </h2>
       <p>
         Predict an ordinary or binomial kriging surface from synthetic or uploaded data
         and render it as a heatmap. Optionally export the plot as PNG or the grid as CSV.
@@ -434,7 +438,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         }}
       >
         <div className="control-group">
-          <label htmlFor="surfaceKrigingType">Kriging mode</label>
+          <FieldLabel htmlFor="surfaceKrigingType" topic="krigingMode">
+            Kriging mode
+          </FieldLabel>
           <select
             id="surfaceKrigingType"
             value={krigingType}
@@ -445,7 +451,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="gridResolution">Grid resolution</label>
+          <FieldLabel htmlFor="gridResolution" topic="gridResolution">
+            Grid resolution
+          </FieldLabel>
           <select
             id="gridResolution"
             value={resolution}
@@ -457,7 +465,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="nBins">Empirical bins</label>
+          <FieldLabel htmlFor="nBins" topic="empiricalBins">
+            Empirical bins
+          </FieldLabel>
           <select id="nBins" value={nBins} onChange={(e) => setNBins(Number(e.target.value))}>
             <option value={8}>8</option>
             <option value={12}>12</option>
@@ -466,7 +476,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="maxDistanceKm">Max distance (optional)</label>
+          <FieldLabel htmlFor="maxDistanceKm" topic="maxDistance">
+            Max distance (optional)
+          </FieldLabel>
           <input
             id="maxDistanceKm"
             type="number"
@@ -478,7 +490,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           />
         </div>
         <div className="control-group">
-          <label htmlFor="variogramModel">Variogram model</label>
+          <FieldLabel htmlFor="variogramModel" topic="variogramModel">
+            Variogram model
+          </FieldLabel>
           <select
             id="variogramModel"
             value={variogramModel}
@@ -493,7 +507,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="surfaceLayer">Surface layer</label>
+          <FieldLabel htmlFor="surfaceLayer" topic="surfaceLayer">
+            Surface layer
+          </FieldLabel>
           <select
             id="surfaceLayer"
             value={layerMode}
@@ -504,7 +520,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="binomialAlpha">Binomial α</label>
+          <FieldLabel htmlFor="binomialAlpha" topic="binomialPrior">
+            Binomial α
+          </FieldLabel>
           <input
             id="binomialAlpha"
             type="number"
@@ -515,7 +533,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           />
         </div>
         <div className="control-group">
-          <label htmlFor="binomialBeta">Binomial β</label>
+          <FieldLabel htmlFor="binomialBeta" topic="binomialPrior">
+            Binomial β
+          </FieldLabel>
           <input
             id="binomialBeta"
             type="number"
@@ -526,7 +546,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           />
         </div>
         <div className="control-group">
-          <label htmlFor="residualMode">Residual plot</label>
+          <FieldLabel htmlFor="residualMode" topic="residualPlot">
+            Residual plot
+          </FieldLabel>
           <select
             id="residualMode"
             value={residualMode}
@@ -538,7 +560,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="surfaceBackend">Backend</label>
+          <FieldLabel htmlFor="surfaceBackend" topic="backend">
+            Backend
+          </FieldLabel>
           <select
             id="surfaceBackend"
             value={backend}
@@ -565,6 +589,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         >
           {harnessRunning ? "Running…" : "Run performance harness"}
         </button>
+        <HelpTip topic="performanceHarness" label="Performance harness" />
         {lastRunResult && (
           <>
             <button type="button" onClick={handleExportPng}>
@@ -579,6 +604,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
       <p style={{ fontSize: "0.9rem", marginBottom: "0.5rem" }}>
         {layerMode === "variance" ? "Variance" : "Value"} range: {surfaceRange.min} to{" "}
         {surfaceRange.max}
+        <HelpTip topic="surfaceRange" label="Value or variance range" />
       </p>
       <canvas
         ref={surfaceRef}
@@ -589,6 +615,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
       />
       <p style={{ fontSize: "0.9rem", marginTop: "0.5rem" }}>
         Residual mean: {residualStats.mean} | Residual RMSE: {residualStats.rmse}
+        <HelpTip topic="residualStats" label="Residual statistics" />
       </p>
       <canvas
         ref={residualRef}
@@ -607,6 +634,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
       <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
         Empirical variogram: lower semivariance at short distances indicates stronger
         local certainty.
+        <HelpTip topic="empiricalVariogramPlot" label="Empirical variogram" />
       </p>
       {harnessReport && (
         <div style={{ marginTop: "1rem" }}>

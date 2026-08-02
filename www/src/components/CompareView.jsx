@@ -6,6 +6,7 @@ import {
 } from "kriging-rs-wasm";
 import { generateSurfaceSamples, buildPredictionGrid, resolveBackendMode } from "../lib/sampleData";
 import { renderSurface } from "../lib/canvas";
+import HelpTip, { FieldLabel } from "./HelpTip";
 
 const CANVAS_W = 360;
 const CANVAS_H = 220;
@@ -125,7 +126,10 @@ export default function CompareView({ onError, webgpuAvailable = false }) {
 
   return (
     <div className="panel">
-      <h2>Compare variogram models</h2>
+      <h2>
+        Compare variogram models
+        <HelpTip topic="compareSection" label="Compare variogram models" />
+      </h2>
       <p>
         Run ordinary kriging on the same synthetic dataset with two different variogram
         models and view the surfaces side-by-side.
@@ -140,7 +144,9 @@ export default function CompareView({ onError, webgpuAvailable = false }) {
         }}
       >
         <div className="control-group">
-          <label htmlFor="compareLeft">Left model</label>
+          <FieldLabel htmlFor="compareLeft" topic="variogramModel">
+            Left model
+          </FieldLabel>
           <select
             id="compareLeft"
             value={modelLeft}
@@ -154,7 +160,9 @@ export default function CompareView({ onError, webgpuAvailable = false }) {
           </select>
         </div>
         <div className="control-group">
-          <label htmlFor="compareRight">Right model</label>
+          <FieldLabel htmlFor="compareRight" topic="variogramModel">
+            Right model
+          </FieldLabel>
           <select
             id="compareRight"
             value={modelRight}

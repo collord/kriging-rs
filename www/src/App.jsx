@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import init, { webgpuAvailable } from "kriging-rs-wasm";
 import ErrorBanner from "./components/ErrorBanner";
+import HelpTip from "./components/HelpTip";
 import QuickDemos from "./components/QuickDemos";
 import SurfaceDemo from "./components/SurfaceDemo";
 import CompareView from "./components/CompareView";
@@ -63,6 +64,7 @@ export default function App() {
         <p>
           <strong>WebGPU:</strong> {webgpuStatus} — use “Auto” in 2D Surface to prefer
           GPU when available.
+          <HelpTip topic="webgpu" label="WebGPU status" />
         </p>
       </div>
 

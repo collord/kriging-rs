@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import HelpTip from "./HelpTip";
 
 /**
  * Parse CSV for kriging.
@@ -96,7 +97,10 @@ export default function DataUpload({ onUpload, uploadedData }) {
 
   return (
     <div className="panel">
-      <h2>Data</h2>
+      <h2>
+        Data
+        <HelpTip topic="dataSection" label="Data" />
+      </h2>
       <p>
         Upload a CSV with columns <code>lat</code>, <code>lon</code>, and either{" "}
         <code>value</code> (ordinary kriging) or <code>successes</code> and{" "}
@@ -111,6 +115,7 @@ export default function DataUpload({ onUpload, uploadedData }) {
           onChange={handleFile}
           aria-label="Upload CSV"
         />
+        <HelpTip topic="csvFormat" label="CSV format" />
         {uploadedData && (
           <button type="button" onClick={clearUpload}>
             Clear upload
