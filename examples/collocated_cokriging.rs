@@ -4,7 +4,8 @@
 //! Run with: `cargo run --example collocated_cokriging`
 
 use kriging_rs::cokriging::{
-    Coregionalization, CoregionalizationStructure, CorrelationBasis, SillMatrix,
+    CokrigingKind, CokrigingModel, Coregionalization, CoregionalizationStructure, CorrelationBasis,
+    MultiVariableDataset, SillMatrix,
 };
 use kriging_rs::simulation::{SimulationOptions, collocated_cosimulate};
 use kriging_rs::{
@@ -91,6 +92,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lmc.n_variables(),
         lmc.n_structures(),
         lmc.cross_sill(0, 1),
+    );
+
+    // --- Full block cokriging: predict the primary from a 2-variable dataset via the LMC. ---
+    // Here the secondary is sampled at the *same* locations as the primary (isotopic).
+    let secondary_values = vec![1.9, 2.6, 1.7, 1.4];
+    let multi = MultiVariableDataset::new(coords, vec![primary, secondary_values])?;
+    let cokriging = CokrigingModel::new(multi, lmc, CokrigingKind::Ordinary)?;
+    let ck = cokriging.predict(0, target)?; // target variable 0 = primary
+    println!(
+        "block ordinary cokriging (var 0): value={:.3}, variance={:.6}",
+        ck.value, ck.variance
     );
 
     Ok(())
