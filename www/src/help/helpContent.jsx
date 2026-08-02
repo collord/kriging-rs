@@ -89,6 +89,30 @@ const HELP_TOPICS = {
       </p>
     ),
   },
+  shapeOverride: {
+    title: "Shape override",
+    content: (
+      <>
+        <p>
+          Optionally pin the variogram’s shape parameter(s) instead of fitting them from data.
+          Leave blank to auto-fit. Nugget, sill, and range are always fit from the data.
+        </p>
+        <ul>
+          <li>
+            <strong>Stable</strong> — shape α in (0, 2] (1 = exponential, 2 = Gaussian-like).
+          </li>
+          <li>
+            <strong>Matérn</strong> — smoothness ν &gt; 0 (0.5 = exponential, large = Gaussian).
+          </li>
+          <li>
+            <strong>Confluent hypergeometric</strong> — smoothness ν &gt; 0 and tail-decay α &gt;
+            0. These two are only weakly identified by auto-fit, so manual control is especially
+            useful here.
+          </li>
+        </ul>
+      </>
+    ),
+  },
   surfaceLayer: {
     title: "Surface layer",
     content: (

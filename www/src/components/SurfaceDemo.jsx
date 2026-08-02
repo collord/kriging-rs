@@ -40,6 +40,13 @@ function readOptions(state) {
       : Number(state.maxDistanceKm);
   const variogramType = VariogramType[state.variogramModel];
   const variogramTypeName = state.variogramModel.toLowerCase();
+  const parseShape = (s) => {
+    if (typeof s !== "string" || s.trim() === "") return undefined;
+    const v = Number(s);
+    return Number.isFinite(v) ? v : undefined;
+  };
+  const shapeOverride = parseShape(state.shapeInput);
+  const shape2Override = parseShape(state.shape2Input);
   // Coerce to positive finite so WASM never receives 0/NaN (e.g. if user clears the input)
   let alpha = Number(state.binomialAlpha);
   let beta = Number(state.binomialBeta);
@@ -56,7 +63,26 @@ function readOptions(state) {
     variogramTypeName,
     alpha,
     beta,
+    shapeOverride,
+    shape2Override,
   };
+}
+
+/**
+ * Return a copy of the fitted variogram with any user-supplied shape overrides applied. Only
+ * touches shapes the model actually uses (a fitted `shape` / `shape2` is present), so blank
+ * inputs and non-shaped models are left untouched. Nugget, sill, and range stay data-fit.
+ */
+function withShapeOverrides(fitted, options) {
+  if (!fitted) return fitted;
+  const next = { ...fitted };
+  if (options.shapeOverride != null && fitted.shape != null) {
+    next.shape = options.shapeOverride;
+  }
+  if (options.shape2Override != null && fitted.shape2 != null) {
+    next.shape2 = options.shape2Override;
+  }
+  return next;
 }
 
 /**
@@ -209,6 +235,9 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
   const [variogramModel, setVariogramModel] = useState("Exponential");
   const [binomialAlpha, setBinomialAlpha] = useState(0.5);
   const [binomialBeta, setBinomialBeta] = useState(0.5);
+  // Optional manual overrides for shaped variogram families. Blank => use the fitted value.
+  const [shapeInput, setShapeInput] = useState("");
+  const [shape2Input, setShape2Input] = useState("");
   const [running, setRunning] = useState(false);
   const [harnessRunning, setHarnessRunning] = useState(false);
   const [harnessReport, setHarnessReport] = useState(null);
@@ -249,6 +278,8 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         variogramModel,
         binomialAlpha,
         binomialBeta,
+        shapeInput,
+        shape2Input,
       });
       const backendResolved = resolveBackendMode(backend, webgpuAvailable);
       const grid = buildPredictionGrid(sample.lats, sample.lons, resolution);
@@ -277,13 +308,13 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           maxDistance: options.maxDistance,
           nBins: options.nBins,
         });
-        fittedVariogram = fitted;
+        fittedVariogram = withShapeOverrides(fitted, options);
         const model = BinomialKriging.fromFittedVariogramWithPrior({
           lats: sampleLats,
           lons: sampleLons,
           successes: sampleSuccesses,
           trials: sampleTrials,
-          fittedVariogram: fitted,
+          fittedVariogram,
           prior: { alpha: options.alpha, beta: options.beta },
         });
         predictions = backendResolved.useGpu
@@ -307,12 +338,12 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           maxDistance: options.maxDistance,
           nBins: options.nBins,
         });
-        fittedVariogram = fitted;
+        fittedVariogram = withShapeOverrides(fitted, options);
         const model = OrdinaryKriging.fromFitted({
           lats: sampleLats,
           lons: sampleLons,
           values: sampleValues,
-          fittedVariogram: fitted,
+          fittedVariogram,
         });
         predictions = backendResolved.useGpu
           ? await model.predictBatchGpu(grid.predLats, grid.predLons)
@@ -550,6 +581,40 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
             <option value="ConfluentHypergeometric">Confluent hypergeometric</option>
           </select>
         </div>
+        {(variogramModel === "Stable" ||
+          variogramModel === "Matern" ||
+          variogramModel === "ConfluentHypergeometric") && (
+          <div className="control-group">
+            <FieldLabel htmlFor="shapeParam" topic="shapeOverride">
+              {variogramModel === "Stable" ? "Shape α (0–2]" : "Smoothness ν"}
+            </FieldLabel>
+            <input
+              id="shapeParam"
+              type="number"
+              min={0.0001}
+              step={0.1}
+              placeholder="auto (fit)"
+              value={shapeInput}
+              onChange={(e) => setShapeInput(e.target.value)}
+            />
+          </div>
+        )}
+        {variogramModel === "ConfluentHypergeometric" && (
+          <div className="control-group">
+            <FieldLabel htmlFor="shape2Param" topic="shapeOverride">
+              Tail decay α
+            </FieldLabel>
+            <input
+              id="shape2Param"
+              type="number"
+              min={0.0001}
+              step={0.1}
+              placeholder="auto (fit)"
+              value={shape2Input}
+              onChange={(e) => setShape2Input(e.target.value)}
+            />
+          </div>
+        )}
         <div className="control-group">
           <FieldLabel htmlFor="surfaceLayer" topic="surfaceLayer">
             Surface layer
