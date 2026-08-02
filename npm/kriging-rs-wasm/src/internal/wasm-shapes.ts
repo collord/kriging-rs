@@ -98,6 +98,7 @@ export interface OrdinaryKrigingOptionsWasm {
     sill: number;
     range: number;
     shape?: number;
+    shape2?: number;
   };
 }
 
@@ -112,6 +113,7 @@ export interface BinomialKrigingOptionsWasm {
     sill: number;
     range: number;
     shape?: number;
+    shape2?: number;
   };
 }
 

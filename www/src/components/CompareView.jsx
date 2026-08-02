@@ -20,6 +20,7 @@ const VARIOGRAM_OPTIONS = [
   { value: "Cubic", label: "Cubic" },
   { value: "Stable", label: "Stable" },
   { value: "Matern", label: "Matérn" },
+  { value: "ConfluentHypergeometric", label: "Confluent hypergeometric" },
 ];
 
 export default function CompareView({ onError, webgpuAvailable = false }) {

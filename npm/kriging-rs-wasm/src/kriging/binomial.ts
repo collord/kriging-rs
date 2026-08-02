@@ -52,6 +52,7 @@ function toBinomialOptionsWasm(
       sill: opts.variogram.sill,
       range: opts.variogram.range,
       shape: opts.variogram.shape,
+      shape2: opts.variogram.shape2,
     },
   };
 }

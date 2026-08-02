@@ -182,6 +182,7 @@ export function evaluateNestedVariogram(
         sill: c.sill,
         range: c.range,
         shape: c.shape,
+        shape2: c.shape2,
       })),
       toFloat64Array(distances)
     );

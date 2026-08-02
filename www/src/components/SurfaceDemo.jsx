@@ -4,6 +4,7 @@ import {
   BinomialKriging,
   VariogramType,
   fitVariogram,
+  evaluateNestedVariogram,
 } from "kriging-rs-wasm";
 import {
   generateSurfaceSamples,
@@ -56,6 +57,39 @@ function readOptions(state) {
     alpha,
     beta,
   };
+}
+
+/**
+ * Evaluate the fitted variogram model on a distance grid using the Rust engine, so the
+ * "Model fit" overlay reflects the actual fitted parameters and supports every family —
+ * including two-shape ones like confluent hypergeometric — without reimplementing the math
+ * in JS. Returns `[{ distance, semivariance }]`, or `null` if it cannot be computed.
+ */
+function buildFittedVariogramCurve(fitted, variogramPoints) {
+  if (!fitted || !variogramPoints?.length) return null;
+  const maxDistance = Math.max(...variogramPoints.map((p) => p.distance), 1e-9);
+  const distances = Array.from({ length: 121 }, (_, i) => (i / 120) * maxDistance);
+  try {
+    const evaluated = evaluateNestedVariogram(
+      [
+        {
+          variogramType: fitted.variogramType,
+          nugget: fitted.nugget,
+          sill: fitted.sill,
+          range: fitted.range,
+          shape: fitted.shape,
+          shape2: fitted.shape2,
+        },
+      ],
+      distances,
+    );
+    return Array.from(evaluated.semivariances, (semivariance, i) => ({
+      distance: distances[i],
+      semivariance,
+    }));
+  } catch {
+    return null;
+  }
 }
 
 async function runOrdinaryPerformanceHarness(options, backendSelection, webgpuAvailable) {
@@ -222,6 +256,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
       let samplePredictions;
       let observedValues;
       let selector;
+      let fittedVariogram = null;
 
       if (krigingType === "binomial") {
         const sampleLats = Float64Array.from(sample.lats);
@@ -242,6 +277,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           maxDistance: options.maxDistance,
           nBins: options.nBins,
         });
+        fittedVariogram = fitted;
         const model = BinomialKriging.fromFittedVariogramWithPrior({
           lats: sampleLats,
           lons: sampleLons,
@@ -271,6 +307,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           maxDistance: options.maxDistance,
           nBins: options.nBins,
         });
+        fittedVariogram = fitted;
         const model = OrdinaryKriging.fromFitted({
           lats: sampleLats,
           lons: sampleLons,
@@ -330,6 +367,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         observedValues,
         options.nBins,
       );
+      const modelCurve = buildFittedVariogramCurve(fittedVariogram, variogramPoints);
       if (vCtx) {
         renderVariogramPlot(
           vCtx,
@@ -337,6 +375,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           options.variogramTypeName,
           CANVAS_W,
           CANVAS_H_VARIOGRAM,
+          modelCurve,
         );
       }
 
@@ -508,6 +547,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
             <option value="Cubic">Cubic</option>
             <option value="Stable">Stable</option>
             <option value="Matern">Matérn</option>
+            <option value="ConfluentHypergeometric">Confluent hypergeometric</option>
           </select>
         </div>
         <div className="control-group">

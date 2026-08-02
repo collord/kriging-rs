@@ -123,7 +123,14 @@ export function renderResidualPlot(ctx, residuals, mode = "scatter", width, heig
   return { mean, rmse };
 }
 
-export function renderVariogramPlot(ctx, variogramPoints, modelType, width, height) {
+export function renderVariogramPlot(
+  ctx,
+  variogramPoints,
+  modelType,
+  width,
+  height,
+  modelCurve = null,
+) {
   if (!ctx) return { pointCount: 0 };
   const padding = 30;
   const plotWidth = width - padding * 2;
@@ -149,7 +156,10 @@ export function renderVariogramPlot(ctx, variogramPoints, modelType, width, heig
     sill: maxSemivariance * 1.05,
     range: maxDistance * 0.45,
   };
-  const yMax = Math.max(maxSemivariance, overlayParams.sill);
+  const modelMax = modelCurve?.length
+    ? Math.max(...modelCurve.map((p) => p.semivariance), 0)
+    : overlayParams.sill;
+  const yMax = Math.max(maxSemivariance, modelMax, 1e-9);
 
   ctx.strokeStyle = "#2c7fb8";
   ctx.lineWidth = 1.5;
@@ -171,19 +181,32 @@ export function renderVariogramPlot(ctx, variogramPoints, modelType, width, heig
   ctx.strokeStyle = "#d95f02";
   ctx.lineWidth = 1.4;
   ctx.beginPath();
-  for (let i = 0; i <= 120; i += 1) {
-    const distance = (i / 120) * maxDistance;
-    const semivariance = variogramSemivariance(
-      distance,
-      modelType,
-      overlayParams.nugget,
-      overlayParams.sill,
-      overlayParams.range,
-    );
-    const x = padding + (distance / maxDistance) * plotWidth;
-    const y = padding + (1 - semivariance / yMax) * plotHeight;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  if (modelCurve?.length) {
+    // Curve from the actual fitted model, evaluated by the Rust engine (supports every
+    // family, including two-shape ones like confluent hypergeometric).
+    for (let i = 0; i < modelCurve.length; i += 1) {
+      const { distance, semivariance } = modelCurve[i];
+      const x = padding + (distance / maxDistance) * plotWidth;
+      const y = padding + (1 - semivariance / yMax) * plotHeight;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+  } else {
+    // Fallback: illustrative curve from heuristic parameters using the JS model formulas.
+    for (let i = 0; i <= 120; i += 1) {
+      const distance = (i / 120) * maxDistance;
+      const semivariance = variogramSemivariance(
+        distance,
+        modelType,
+        overlayParams.nugget,
+        overlayParams.sill,
+        overlayParams.range,
+      );
+      const x = padding + (distance / maxDistance) * plotWidth;
+      const y = padding + (1 - semivariance / yMax) * plotHeight;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
   }
   ctx.stroke();
   ctx.fillStyle = "#444";

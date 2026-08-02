@@ -1297,6 +1297,8 @@ export interface NestedVariogramComponent {
   sill: number;
   range: number;
   shape?: number;
+  /** Second shape parameter for confluent-hypergeometric (tail-decay `alpha`); omit otherwise. */
+  shape2?: number;
 }
 
 /** Result of {@link evaluateNestedVariogram}. */

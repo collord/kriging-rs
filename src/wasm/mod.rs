@@ -2767,6 +2767,10 @@ struct NestedComponent {
     range: f64,
     #[serde(default)]
     shape: Option<f64>,
+    /// Second shape parameter, consulted only by two-shape families (Confluent
+    /// Hypergeometric tail-decay `alpha`). Ignored for other model types.
+    #[serde(default)]
+    shape2: Option<f64>,
 }
 
 /// Evaluate a nested (additive) variogram at a list of distances. Returns
@@ -2790,7 +2794,14 @@ pub fn wasm_evaluate_nested_variogram(
     }
     let mut models = Vec::with_capacity(comps.len());
     for c in &comps {
-        let m = parse_variogram(&c.variogram_type, c.nugget, c.sill, c.range, c.shape)?;
+        let m = parse_variogram_with_shape2(
+            &c.variogram_type,
+            c.nugget,
+            c.sill,
+            c.range,
+            c.shape,
+            c.shape2,
+        )?;
         models.push(m);
     }
     let nested = NestedVariogram::new(models).map_err(kriging_err_to_js)?;

@@ -24,6 +24,10 @@ const RW2006 = {
   text: "Rasmussen & Williams (2006), Gaussian Processes for Machine Learning, Ch. 4 (open access)",
   url: "https://gaussianprocess.org/gpml/",
 };
+const MA_BHADRA2023 = {
+  text: "Ma & Bhadra (2023), Beyond Matérn: On a Class of Interpretable Confluent Hypergeometric Covariance Functions, JASA 118(543):2045–2058",
+  url: "https://doi.org/10.1080/01621459.2022.2027775",
+};
 
 /** Shared parameter legend fragments. */
 const BASE_PARAMS = "c₀ = nugget, s = sill, a = range, h = lag distance";
@@ -72,6 +76,14 @@ const VARIOGRAM_MATH = {
     note: "ν sets the smoothness continuously: ν = 0.5 gives the exponential, ν → ∞ the Gaussian. Kᵥ is the modified Bessel function of the second kind, Γ the gamma function.",
     params: `${BASE_PARAMS}, ν = smoothness`,
     citations: [STEIN1999, RW2006],
+  },
+  confluenthypergeometric: {
+    label: "Confluent hypergeometric",
+    formula:
+      "γ(h) = c₀ + (s − c₀)·[ 1 − ρ(h) ]\nρ(h) = (Γ(ν+α)/Γ(ν))·U(α, 1−ν, ½·(h/a)²)",
+    note: "A two-parameter generalization of Matérn: ν sets short-scale smoothness, α the tail decay. As α → ∞ it recovers Matérn, but for finite α the tails are polynomial (long-range dependence). U is the confluent hypergeometric function of the second kind.",
+    params: `${BASE_PARAMS}, ν = smoothness, α = tail decay`,
+    citations: [MA_BHADRA2023, STEIN1999],
   },
 };
 

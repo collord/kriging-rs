@@ -71,5 +71,6 @@ export function fittedToVariogramParamsWithNuggetOverride(
     sill: f.sill,
     range: f.range,
     shape: f.shape,
+    shape2: f.shape2,
   };
 }

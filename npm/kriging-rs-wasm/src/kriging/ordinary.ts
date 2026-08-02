@@ -52,19 +52,38 @@ export class OrdinaryKriging {
   constructor(options: OrdinaryKrigingOptions) {
     const mod = requireLoadedModule();
     try {
-      // Prefer the zero-object-overhead `fromArrays` factory when the WASM package exposes
-      // it: it skips the `serde_wasm_bindgen::from_value` deserialization that would
-      // otherwise dominate constructor cost for large sample sets.
-      this.inner = mod.WasmOrdinaryKriging.fromArrays(
-        toFloat64Array(options.lats),
-        toFloat64Array(options.lons),
-        toFloat64Array(options.values),
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape
-      );
+      if (options.variogram.shape2 != null) {
+        // Two-shape families (confluent hypergeometric) carry a second shape parameter that
+        // the flat `fromArrays` factory cannot express; the options-object constructor
+        // threads it through. Only taken for these models, so the common path is unaffected.
+        this.inner = new mod.WasmOrdinaryKriging({
+          lats: Array.from(toFloat64Array(options.lats)),
+          lons: Array.from(toFloat64Array(options.lons)),
+          values: Array.from(toFloat64Array(options.values)),
+          variogram: {
+            variogramType: String(options.variogram.variogramType),
+            nugget: options.variogram.nugget,
+            sill: options.variogram.sill,
+            range: options.variogram.range,
+            shape: options.variogram.shape,
+            shape2: options.variogram.shape2,
+          },
+        });
+      } else {
+        // Prefer the zero-object-overhead `fromArrays` factory: it skips the
+        // `serde_wasm_bindgen::from_value` deserialization that would otherwise dominate
+        // constructor cost for large sample sets.
+        this.inner = mod.WasmOrdinaryKriging.fromArrays(
+          toFloat64Array(options.lats),
+          toFloat64Array(options.lons),
+          toFloat64Array(options.values),
+          options.variogram.variogramType,
+          options.variogram.nugget,
+          options.variogram.sill,
+          options.variogram.range,
+          options.variogram.shape
+        );
+      }
     } catch (e) {
       throw wrapThrown(e);
     }
