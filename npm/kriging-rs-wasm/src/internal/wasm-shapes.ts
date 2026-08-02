@@ -850,6 +850,16 @@ export type RawModule = {
     semivariances: Float64Array,
     nPairs: Float64Array
   ) => unknown;
+  cokrigeCollocated: (options: unknown) => unknown;
+  collocatedSecondaryFromPaired: (
+    primary: Float64Array,
+    secondary: Float64Array
+  ) => unknown;
+  collocatedCosimulate: (options: unknown) => unknown;
+  cokrige: (options: unknown) => unknown;
+  cosimulate: (options: unknown) => unknown;
+  computeCrossVariogram: (options: unknown) => unknown;
+  fitLmc: (options: unknown) => unknown;
 };
 
 /**

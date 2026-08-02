@@ -170,6 +170,18 @@ impl CoregionalizationStructure {
     pub fn n_variables(&self) -> usize {
         self.sills.n_variables()
     }
+
+    /// This structure's correlation basis.
+    #[inline]
+    pub fn basis(&self) -> &CorrelationBasis {
+        &self.basis
+    }
+
+    /// This structure's (PSD) sill matrix.
+    #[inline]
+    pub fn sills(&self) -> &SillMatrix {
+        &self.sills
+    }
 }
 
 /// A Linear Model of Coregionalization: `C_ij(h) = Σ_k B_k[i, j]·ρ_k(h)`.
@@ -214,6 +226,12 @@ impl Coregionalization {
     #[inline]
     pub fn n_structures(&self) -> usize {
         self.structures.len()
+    }
+
+    /// The basic structures, in fit/construction order.
+    #[inline]
+    pub fn structures(&self) -> &[CoregionalizationStructure] {
+        &self.structures
     }
 
     /// Cross-covariance `C_ij(h) = Σ_k B_k[i, j]·ρ_k(h)` between variables `i` and `j`.

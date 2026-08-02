@@ -51,6 +51,7 @@ use crate::variogram::spec::VariogramSpec;
 use crate::{Real, compute_empirical_variogram};
 use std::num::NonZeroUsize;
 
+pub mod cokriging;
 pub mod spacetime;
 pub mod three_d;
 
@@ -250,7 +251,7 @@ pub(super) struct JsBinomialPrediction {
     pub prevalence_variance: f64,
 }
 
-fn variogram_type_name(variogram_type: VariogramType) -> &'static str {
+pub(super) fn variogram_type_name(variogram_type: VariogramType) -> &'static str {
     match variogram_type {
         VariogramType::Spherical => "spherical",
         VariogramType::Exponential => "exponential",

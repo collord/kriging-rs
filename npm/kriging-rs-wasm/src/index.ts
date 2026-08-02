@@ -121,8 +121,35 @@ export {
   fitSpaceTimeVariogram,
 } from "./spacetime/index.js";
 export { datesFromTimes, timesFromDates } from "./time.js";
+export {
+  cokrige,
+  cokrigeCollocated,
+  collocatedCosimulate,
+  collocatedSecondaryFromPaired,
+  computeCrossVariogram,
+  cosimulateMultiVariable,
+  fitLmc,
+} from "./cokriging.js";
 
 export type {
+  CokrigeCollocatedOptions,
+  CokrigeOptions,
+  CokrigingKindSpec,
+  CollocatedCosimulateOptions,
+  CollocatedSecondary,
+  CoregionalizationSpec,
+  CoregionalizationStructureSpec,
+  CorrelationBasisSpec,
+  CosimulateMultiVariableOptions,
+  CosimulationResult,
+  CrossVariogramOptions,
+  CrossVariogramResult,
+  FitLmcOptions,
+  HeterotopicMultiVariableData,
+  IsotopicMultiVariableData,
+  LmcFitResult,
+  MultiVariableData,
+  VariableSamples,
   AggregatePrevalenceByPolygonOptions,
   Anisotropy3DParams,
   AxisVariogramInput,

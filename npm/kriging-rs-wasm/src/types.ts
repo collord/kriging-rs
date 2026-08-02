@@ -2026,3 +2026,187 @@ export interface GaussianSimulation3DOptions {
 export interface GaussianSimulation3DResult {
   aborted: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Cokriging (multi-variable interpolation & cosimulation)
+// ---------------------------------------------------------------------------
+
+/**
+ * A collocated secondary variable's global characterization: its `mean`, standard deviation
+ * (`stdDev`), and the primary–secondary `correlation` at lag zero. Build one from paired
+ * samples with {@link collocatedSecondaryFromPaired}.
+ */
+export interface CollocatedSecondary {
+  mean: number;
+  stdDev: number;
+  correlation: number;
+}
+
+/** Options for {@link cokrigeCollocated}. */
+export interface CokrigeCollocatedOptions {
+  /** Primary sample latitudes (degrees). */
+  lats: NumericArrayInput;
+  /** Primary sample longitudes (degrees). */
+  lons: NumericArrayInput;
+  /** Primary sample values. */
+  values: NumericArrayInput;
+  /** Primary variogram. */
+  variogram: VariogramParams;
+  /** Known primary mean `m₁` (simple-cokriging). */
+  primaryMean: number;
+  /** Secondary characterization (dense; known at every target). */
+  secondary: CollocatedSecondary;
+  /** Target latitudes (degrees). */
+  targetLats: NumericArrayInput;
+  /** Target longitudes (degrees). */
+  targetLons: NumericArrayInput;
+  /** Collocated secondary value at each target (same length as `targetLats`). */
+  targetSecondaryValues: NumericArrayInput;
+}
+
+/** Options for {@link collocatedCosimulate}. */
+export interface CollocatedCosimulateOptions {
+  conditioningLats: NumericArrayInput;
+  conditioningLons: NumericArrayInput;
+  conditioningValues: NumericArrayInput;
+  targetLats: NumericArrayInput;
+  targetLons: NumericArrayInput;
+  /** Collocated secondary value at each target. */
+  targetSecondaryValues: NumericArrayInput;
+  variogram: VariogramParams;
+  primaryMean: number;
+  secondary: CollocatedSecondary;
+  /** RNG seed for reproducibility (defaults to `0n`). */
+  seed?: number | bigint;
+  /** Optional permutation of `0..nTargets` giving the visit order. */
+  targetOrder?: ArrayLike<number> | Uint32Array;
+}
+
+/**
+ * One LMC basic structure's correlation basis: either a pure nugget (`nugget: true`) or the
+ * normalized covariance of a `variogram`. Exactly one form must be given.
+ */
+export interface CorrelationBasisSpec {
+  /** Pure nugget structure (`ρ(h) = 1` at `h = 0`, else `0`). */
+  nugget?: boolean;
+  /** Normalized covariance of this variogram (its own sill/nugget cancel). */
+  variogram?: VariogramParams;
+}
+
+/** One structure of a Linear Model of Coregionalization. */
+export interface CoregionalizationStructureSpec {
+  basis: CorrelationBasisSpec;
+  /** Row-major `p × p` positive-semidefinite sill matrix. */
+  sills: number[][];
+}
+
+/** A Linear Model of Coregionalization: a sum of basic structures. */
+export interface CoregionalizationSpec {
+  structures: CoregionalizationStructureSpec[];
+}
+
+/** Isotopic multi-variable data: all variables sampled at the same locations. */
+export interface IsotopicMultiVariableData {
+  lats: NumericArrayInput;
+  lons: NumericArrayInput;
+  /** `variables[v]` is the column of values for variable `v` at the shared coordinates. */
+  variables: NumericArrayInput[];
+}
+
+/** One variable's samples in the heterotopic layout. */
+export interface VariableSamples {
+  lats: NumericArrayInput;
+  lons: NumericArrayInput;
+  values: NumericArrayInput;
+}
+
+/** Heterotopic multi-variable data: each variable has its own locations. */
+export interface HeterotopicMultiVariableData {
+  perVariable: VariableSamples[];
+}
+
+/** Multi-variable data, either isotopic or heterotopic. */
+export type MultiVariableData =
+  | IsotopicMultiVariableData
+  | HeterotopicMultiVariableData;
+
+/** Cokriging estimator: ordinary, or simple with one mean per variable. */
+export type CokrigingKindSpec =
+  | { type: "ordinary" }
+  | { type: "simple"; means: number[] };
+
+/** Options for {@link cokrige}. */
+export interface CokrigeOptions {
+  data: MultiVariableData;
+  coregionalization: CoregionalizationSpec;
+  kind: CokrigingKindSpec;
+  /** Which variable to predict (0-based). */
+  targetVariable: number;
+  targetLats: NumericArrayInput;
+  targetLons: NumericArrayInput;
+}
+
+/** Options for {@link cosimulateMultiVariable}. */
+export interface CosimulateMultiVariableOptions {
+  data: MultiVariableData;
+  coregionalization: CoregionalizationSpec;
+  /** Known mean per variable (simple cokriging). */
+  means: number[];
+  targetLats: NumericArrayInput;
+  targetLons: NumericArrayInput;
+  /** RNG seed for reproducibility (defaults to `0n`). */
+  seed?: number | bigint;
+  /** Optional permutation of `0..nTargets` giving the visit order. */
+  targetOrder?: ArrayLike<number> | Uint32Array;
+}
+
+/** Result of {@link cosimulateMultiVariable}. */
+export interface CosimulationResult {
+  nVariables: number;
+  nTargets: number;
+  /** `samples[v][i]` is the simulated value of variable `v` at target `i`. */
+  samples: number[][];
+}
+
+/** Options for {@link computeCrossVariogram}. */
+export interface CrossVariogramOptions {
+  lats: NumericArrayInput;
+  lons: NumericArrayInput;
+  variables: NumericArrayInput[];
+  nBins: number;
+  maxDistance?: number;
+}
+
+/** Result of {@link computeCrossVariogram}. */
+export interface CrossVariogramResult {
+  nVariables: number;
+  distances: number[];
+  nPairs: number[];
+  /** `gamma[bin]` is the flattened row-major `p × p` cross-semivariance matrix at that lag. */
+  gamma: number[][];
+}
+
+/** Options for {@link fitLmc}. */
+export interface FitLmcOptions {
+  lats: NumericArrayInput;
+  lons: NumericArrayInput;
+  variables: NumericArrayInput[];
+  nBins: number;
+  maxDistance?: number;
+  /** The fixed basic structures (ranges/shapes chosen up front); their sills are fitted. */
+  bases: CorrelationBasisSpec[];
+  /** Maximum Goulard–Voltz sweeps (defaults to 200). */
+  maxIterations?: number;
+  /** Relative-change stopping tolerance (defaults to 1e-7). */
+  tolerance?: number;
+}
+
+/** Result of {@link fitLmc}. */
+export interface LmcFitResult {
+  /** The fitted, admissible coregionalization — ready to feed to {@link cokrige}. */
+  coregionalization: CoregionalizationSpec;
+  /** Final weighted sum of squared residuals. */
+  residual: number;
+  /** Number of Goulard–Voltz sweeps performed. */
+  iterations: number;
+}
