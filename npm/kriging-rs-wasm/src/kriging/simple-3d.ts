@@ -63,11 +63,7 @@ export class SimpleKriging3D {
         anis.ang3,
         anis.anis1,
         anis.anis2,
-        options.variogram.variogramType,
-        options.variogram.nugget,
-        options.variogram.sill,
-        options.variogram.range,
-        options.variogram.shape
+        options.variogram
       );
     } catch (e) {
       throw wrapThrown(e);

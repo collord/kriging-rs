@@ -492,6 +492,25 @@ const variogram3d = {
   range: 100,
 };
 
+// Contract: the 3-D options accept a two-shape (confluent-hypergeometric)
+// variogram spec, including the tail-decay shape2. This is what the
+// VariogramSpec boundary threads through to the 3-D surface.
+const _ch3d = new OrdinaryKriging3D({
+  xs: xs3,
+  ys: ys3,
+  zs: zs3,
+  values: values3,
+  variogram: {
+    variogramType: "confluenthypergeometric",
+    nugget: 0.01,
+    sill: 1.0,
+    range: 100,
+    shape: 1.0,
+    shape2: 2.0,
+  },
+});
+_ch3d.free();
+
 const ok3d = new OrdinaryKriging3D({
   xs: xs3,
   ys: ys3,

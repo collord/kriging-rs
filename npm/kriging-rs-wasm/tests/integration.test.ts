@@ -3820,6 +3820,39 @@ describe("3-D ordinary kriging", () => {
     }
   });
 
+  test("confluent-hypergeometric variogram works and shape2 (alpha) is threaded", () => {
+    const { xs, ys, zs, values } = cubeSamples3D();
+    // Two CH models differing only in the tail-decay alpha (shape2).
+    // If shape2 reaches the engine, the predictions must differ; this
+    // is what the VariogramSpec boundary buys the 3-D surface (a bare
+    // scalar API could only carry the first shape, nu).
+    const lowAlpha = new OrdinaryKriging3D({
+      xs, ys, zs, values,
+      variogram: {
+        variogramType: "confluenthypergeometric",
+        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 0.5,
+      },
+    });
+    const highAlpha = new OrdinaryKriging3D({
+      xs, ys, zs, values,
+      variogram: {
+        variogramType: "confluenthypergeometric",
+        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 5.0,
+      },
+    });
+    try {
+      // Off the symmetry axes so the tail shape is detectable.
+      const a = lowAlpha.predict(2, 4, 1.5);
+      const b = highAlpha.predict(2, 4, 1.5);
+      expect(Number.isFinite(a.value)).toBe(true);
+      expect(Number.isFinite(b.value)).toBe(true);
+      expect(Math.abs(a.value - b.value)).toBeGreaterThan(1e-6);
+    } finally {
+      lowAlpha.free();
+      highAlpha.free();
+    }
+  });
+
   test("predictBatch returns parallel typed arrays", () => {
     const { xs, ys, zs, values } = cubeSamples3D();
     const model = new OrdinaryKriging3D({

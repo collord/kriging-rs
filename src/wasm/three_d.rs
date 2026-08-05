@@ -20,7 +20,7 @@ use js_sys::{Float64Array, Function, Object, Reflect};
 use std::num::NonZeroUsize;
 use wasm_bindgen::prelude::*;
 
-use super::{coded_err, kriging_err_to_js, parse_variogram, set_object_field};
+use super::{coded_err, kriging_err_to_js, set_object_field, variogram_model_from_js};
 use crate::Real;
 use crate::anisotropy_3d::Anisotropy3D;
 use crate::coord_3d::Coord3D;
@@ -168,7 +168,9 @@ impl WasmOrdinaryKriging3D {
     /// Build an OK3D model from flat typed-array inputs. The
     /// anisotropy is supplied in GSLib parameter form
     /// `(ang1, ang2, ang3, anis1, anis2)`; pass `(0, 0, 0, 1, 1)` for
-    /// the identity. Optional `maxRadius` and `maxNeighbors` build an
+    /// the identity. The variogram is a spec object
+    /// `{ variogramType, nugget, sill, range, shape?, shape2? }`.
+    /// Optional `maxRadius` and `maxNeighbors` build an
     /// anisotropy-aware kd-tree neighborhood; passing neither uses
     /// all samples.
     #[wasm_bindgen(js_name = fromArrays)]
@@ -182,11 +184,7 @@ impl WasmOrdinaryKriging3D {
         ang3: f64,
         anis1: f64,
         anis2: f64,
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
         max_radius: Option<f64>,
         max_neighbors: Option<usize>,
     ) -> Result<WasmOrdinaryKriging3D, JsValue> {
@@ -200,7 +198,7 @@ impl WasmOrdinaryKriging3D {
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
-        let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let variogram = variogram_model_from_js(variogram)?;
         let model = OrdinaryKrigingModel3D::new(dataset, anisotropy, variogram)
             .map_err(kriging_err_to_js)?;
         let model = maybe_with_neighborhood_ok(model, max_radius, max_neighbors)?;
@@ -267,11 +265,7 @@ impl WasmSimpleKriging3D {
         ang3: f64,
         anis1: f64,
         anis2: f64,
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmSimpleKriging3D, JsValue> {
         if values.len() != xs.len() {
             return Err(coded_err(
@@ -283,7 +277,7 @@ impl WasmSimpleKriging3D {
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
-        let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let variogram = variogram_model_from_js(variogram)?;
         let model = SimpleKrigingModel3D::new(dataset, anisotropy, variogram, mean as Real)
             .map_err(kriging_err_to_js)?;
         Ok(Self { inner: model })
@@ -343,11 +337,7 @@ impl WasmUniversalKriging3D {
         ang3: f64,
         anis1: f64,
         anis2: f64,
-        variogram_type: &str,
-        nugget: f64,
-        sill: f64,
-        range: f64,
-        shape: Option<f64>,
+        variogram: JsValue,
     ) -> Result<WasmUniversalKriging3D, JsValue> {
         if values.len() != xs.len() {
             return Err(coded_err(
@@ -359,7 +349,7 @@ impl WasmUniversalKriging3D {
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
-        let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+        let variogram = variogram_model_from_js(variogram)?;
         let model = UniversalKrigingModel3D::new(dataset, anisotropy, variogram, Trend3D::Linear)
             .map_err(kriging_err_to_js)?;
         Ok(Self { inner: model })
@@ -423,11 +413,7 @@ pub fn wasm_gaussian_simulation_3d(
     ang3: f64,
     anis1: f64,
     anis2: f64,
-    variogram_type: &str,
-    nugget: f64,
-    sill: f64,
-    range: f64,
-    shape: Option<f64>,
+    variogram: JsValue,
     nx: usize,
     ny: usize,
     nz: usize,
@@ -452,7 +438,7 @@ pub fn wasm_gaussian_simulation_3d(
     let dataset =
         PlanarDataset3D::new(coords, to_real_vec(sample_values)).map_err(kriging_err_to_js)?;
     let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
-    let variogram = parse_variogram(variogram_type, nugget, sill, range, shape)?;
+    let variogram = variogram_model_from_js(variogram)?;
     let model = SgsModel3D::new(dataset, anisotropy, variogram).map_err(sgs_err_to_js)?;
     let grid = Grid3D::new(
         nx,

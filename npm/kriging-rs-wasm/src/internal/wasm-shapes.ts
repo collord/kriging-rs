@@ -720,11 +720,7 @@ export type RawModule = {
       ang3: number,
       anis1: number,
       anis2: number,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined,
+      variogram: VariogramSpecWasm,
       maxRadius: number | undefined,
       maxNeighbors: number | undefined
     ): WasmKriging3DInstance;
@@ -741,11 +737,7 @@ export type RawModule = {
       ang3: number,
       anis1: number,
       anis2: number,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined
+      variogram: VariogramSpecWasm
     ): WasmKriging3DInstance;
   };
   WasmUniversalKriging3D?: {
@@ -759,11 +751,7 @@ export type RawModule = {
       ang3: number,
       anis1: number,
       anis2: number,
-      variogramType: string,
-      nugget: number,
-      sill: number,
-      range: number,
-      shape: number | undefined
+      variogram: VariogramSpecWasm
     ): WasmKriging3DInstance;
   };
   gaussianSimulation3D?: (
@@ -776,11 +764,7 @@ export type RawModule = {
     ang3: number,
     anis1: number,
     anis2: number,
-    variogramType: string,
-    nugget: number,
-    sill: number,
-    range: number,
-    shape: number | undefined,
+    variogram: VariogramSpecWasm,
     nx: number,
     ny: number,
     nz: number,
