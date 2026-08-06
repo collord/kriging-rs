@@ -176,7 +176,7 @@ pub use simulation_3d::{
     gaussian_simulation_3d_stream_with,
 };
 pub use variogram::fitting::{
-    FitResult, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
+    FitResult, ModelForm, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
     fit_spherical_3d_with_fixed_nugget, fit_variogram,
 };
 pub use variogram::models::{VariogramModel, VariogramType};

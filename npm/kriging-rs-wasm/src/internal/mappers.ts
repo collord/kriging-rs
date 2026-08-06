@@ -391,6 +391,8 @@ export function mapDirectionalVariogram3DResult(
 
 export function mapFittedSpherical3D(value: unknown): FittedSpherical3D {
   const rec = asRecord(value);
+  const optNumber = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
   return {
     nugget: requireNumber(rec.nugget),
     sill: requireNumber(rec.sill),
@@ -398,6 +400,11 @@ export function mapFittedSpherical3D(value: unknown): FittedSpherical3D {
     rangeMinor: requireNumber(rec.rangeMinor),
     rangeVertical: requireNumber(rec.rangeVertical),
     residuals: requireNumber(rec.residuals),
+    // `variogramType` is absent on fits produced before the type-generic
+    // fitter; default to spherical so older callers keep working.
+    variogramType: requireVariogramType(rec.variogramType ?? "spherical"),
+    shape: optNumber(rec.shape),
+    shape2: optNumber(rec.shape2),
   };
 }
 

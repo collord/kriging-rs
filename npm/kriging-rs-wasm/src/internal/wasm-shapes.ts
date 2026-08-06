@@ -803,7 +803,10 @@ export type RawModule = {
     minorNPairs: Float64Array,
     verticalDistances: Float64Array,
     verticalSemivariances: Float64Array,
-    verticalNPairs: Float64Array
+    verticalNPairs: Float64Array,
+    variogramType: string,
+    shape1: number,
+    shape2: number
   ) => unknown;
   fitSpherical3DTwoStage?: (
     majorDistances: Float64Array,
@@ -815,7 +818,10 @@ export type RawModule = {
     verticalDistances: Float64Array,
     verticalSemivariances: Float64Array,
     verticalNPairs: Float64Array,
-    dataVariance: number
+    dataVariance: number,
+    variogramType: string,
+    shape1: number,
+    shape2: number
   ) => unknown;
   fitSpherical3DFixedNugget?: (
     majorDistances: Float64Array,
@@ -827,7 +833,10 @@ export type RawModule = {
     verticalDistances: Float64Array,
     verticalSemivariances: Float64Array,
     verticalNPairs: Float64Array,
-    nugget: number
+    nugget: number,
+    variogramType: string,
+    shape1: number,
+    shape2: number
   ) => unknown;
   fitSpherical1D?: (
     distances: Float64Array,

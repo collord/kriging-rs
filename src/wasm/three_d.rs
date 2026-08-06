@@ -590,6 +590,7 @@ fn sgs_err_to_js(err: SgsError) -> JsValue {
 /// kriging via the existing Anisotropy3D + spherical VariogramModel
 /// types.
 #[wasm_bindgen(js_name = fitSpherical3DJoint)]
+#[allow(clippy::too_many_arguments)]
 pub fn wasm_fit_spherical_3d_joint(
     major_distances: &[f64],
     major_semivariances: &[f64],
@@ -600,6 +601,9 @@ pub fn wasm_fit_spherical_3d_joint(
     vertical_distances: &[f64],
     vertical_semivariances: &[f64],
     vertical_n_pairs: &[f64],
+    variogram_type: &str,
+    shape1: f64,
+    shape2: f64,
 ) -> Result<JsValue, JsValue> {
     let major =
         build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
@@ -611,7 +615,8 @@ pub fn wasm_fit_spherical_3d_joint(
         vertical_semivariances,
         vertical_n_pairs,
     )?;
-    let fit = crate::variogram::fitting::fit_spherical_3d_joint(&major, &minor, &vertical)
+    let form = parse_model_form(variogram_type, shape1, shape2)?;
+    let fit = crate::variogram::fitting::fit_spherical_3d_joint(form, &major, &minor, &vertical)
         .map_err(kriging_err_to_js)?;
     spherical_3d_fit_to_js(&fit)
 }
@@ -624,6 +629,7 @@ pub fn wasm_fit_spherical_3d_joint(
 /// `fit_spherical_3d_two_stage`). Arguments and return shape match
 /// `fitSpherical3DJoint`.
 #[wasm_bindgen(js_name = fitSpherical3DTwoStage)]
+#[allow(clippy::too_many_arguments)]
 pub fn wasm_fit_spherical_3d_two_stage(
     major_distances: &[f64],
     major_semivariances: &[f64],
@@ -639,6 +645,9 @@ pub fn wasm_fit_spherical_3d_two_stage(
     // doesn't slide the fitter into a degenerate low-nugget /
     // high-sill solution. Pass 0 to opt out (treat sill as fully free).
     data_variance: f64,
+    variogram_type: &str,
+    shape1: f64,
+    shape2: f64,
 ) -> Result<JsValue, JsValue> {
     let major =
         build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
@@ -650,7 +659,9 @@ pub fn wasm_fit_spherical_3d_two_stage(
         vertical_semivariances,
         vertical_n_pairs,
     )?;
+    let form = parse_model_form(variogram_type, shape1, shape2)?;
     let fit = crate::variogram::fitting::fit_spherical_3d_two_stage(
+        form,
         &major,
         &minor,
         &vertical,
@@ -665,6 +676,7 @@ pub fn wasm_fit_spherical_3d_two_stage(
 /// user has overridden the auto-derived nugget by reading it off the
 /// vertical's short-lag intercept manually.
 #[wasm_bindgen(js_name = fitSpherical3DFixedNugget)]
+#[allow(clippy::too_many_arguments)]
 pub fn wasm_fit_spherical_3d_fixed_nugget(
     major_distances: &[f64],
     major_semivariances: &[f64],
@@ -676,6 +688,9 @@ pub fn wasm_fit_spherical_3d_fixed_nugget(
     vertical_semivariances: &[f64],
     vertical_n_pairs: &[f64],
     nugget: f64,
+    variogram_type: &str,
+    shape1: f64,
+    shape2: f64,
 ) -> Result<JsValue, JsValue> {
     let major =
         build_empirical_variogram("major", major_distances, major_semivariances, major_n_pairs)?;
@@ -687,7 +702,9 @@ pub fn wasm_fit_spherical_3d_fixed_nugget(
         vertical_semivariances,
         vertical_n_pairs,
     )?;
+    let form = parse_model_form(variogram_type, shape1, shape2)?;
     let fit = crate::variogram::fitting::fit_spherical_3d_with_fixed_nugget(
+        form,
         &major,
         &minor,
         &vertical,
@@ -695,6 +712,29 @@ pub fn wasm_fit_spherical_3d_fixed_nugget(
     )
     .map_err(kriging_err_to_js)?;
     spherical_3d_fit_to_js(&fit)
+}
+
+/// Shared helper: resolve a JS variogram-type string + shape scalars into a
+/// [`ModelForm`] for the joint fitters. The type string flows through
+/// [`VariogramSpec::resolve_type`] (same aliases as the rest of the WASM
+/// boundary). A non-finite `shape1`/`shape2` (e.g. JS `NaN`) is treated as
+/// "absent" -- shape-free families ignore them, so callers pass `NaN` there.
+fn parse_model_form(
+    variogram_type: &str,
+    shape1: f64,
+    shape2: f64,
+) -> Result<crate::variogram::fitting::ModelForm, JsValue> {
+    let vt = crate::variogram::spec::VariogramSpec::new(variogram_type, 0.0, 1.0, 1.0, None, None)
+        .resolve_type()
+        .ok_or_else(|| coded_err("unknown variogram_type", "unknown_variogram"))?;
+    let opt = |v: f64| -> Option<Real> {
+        if v.is_finite() { Some(v as Real) } else { None }
+    };
+    Ok(crate::variogram::fitting::ModelForm {
+        variogram_type: vt,
+        shape1: opt(shape1),
+        shape2: opt(shape2),
+    })
 }
 
 /// Shared helper: convert JS-side per-axis arrays into an
@@ -748,6 +788,17 @@ fn spherical_3d_fit_to_js(
         &JsValue::from_f64(fit.range_vertical as f64),
     )?;
     set_object_field(&obj, "residuals", &JsValue::from_f64(fit.residuals as f64))?;
+    set_object_field(
+        &obj,
+        "variogramType",
+        &JsValue::from_str(super::variogram_type_name(fit.variogram_type)),
+    )?;
+    let shape_field = |v: Option<Real>| match v {
+        Some(s) => JsValue::from_f64(s as f64),
+        None => JsValue::NULL,
+    };
+    set_object_field(&obj, "shape", &shape_field(fit.shape1))?;
+    set_object_field(&obj, "shape2", &shape_field(fit.shape2))?;
     Ok(obj.into())
 }
 

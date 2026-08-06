@@ -1911,6 +1911,16 @@ export interface FitSpherical3DOptions {
   major: AxisVariogramInput;
   minor: AxisVariogramInput;
   vertical: AxisVariogramInput;
+  /**
+   * Variogram family to fit. Defaults to `"spherical"`. The fitter optimizes
+   * nugget, sill, and the three ranges; for shaped families (matern, stable,
+   * power, confluenthypergeometric) the shape(s) below are held fixed.
+   */
+  variogramType?: VariogramTypeName;
+  /** Primary shape for shaped families (Stable α, Matérn/CH ν, Power exponent). */
+  shape?: number;
+  /** Second shape for confluent-hypergeometric (tail-decay α). */
+  shape2?: number;
 }
 
 /**
@@ -1950,6 +1960,12 @@ export interface FittedSpherical3D {
   rangeVertical: number;
   /** Sum of weighted squared residuals at the optimum. */
   residuals: number;
+  /** The variogram family these parameters describe. */
+  variogramType: VariogramTypeName;
+  /** Primary shape, when the family has one; `null` for shape-free families. */
+  shape: number | null;
+  /** Second shape (confluent-hypergeometric tail-decay α); `null` otherwise. */
+  shape2: number | null;
 }
 
 /** Options for {@link fitSpherical1D}: one axis worth of experimental variogram. */

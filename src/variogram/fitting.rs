@@ -261,35 +261,96 @@ pub struct Spherical3DJointFit {
     pub range_vertical: Real,
     /// Weighted sum of squared residuals at the returned parameter set.
     pub residuals: Real,
+    /// The variogram family these parameters describe. Historically the
+    /// joint fitter only fitted spherical models (hence the `spherical`
+    /// names); it now fits any family at a caller-supplied shape.
+    pub variogram_type: VariogramType,
+    /// Primary shape (Stable α, Matérn/CH ν, Power exponent); `None` for
+    /// shape-free families.
+    pub shape1: Option<Real>,
+    /// Second shape (Confluent Hypergeometric tail-decay α); `None` otherwise.
+    pub shape2: Option<Real>,
 }
 
-#[inline]
-fn spherical_kernel(t: Real) -> Real {
-    if t >= 1.0 {
-        1.0
-    } else if t <= 0.0 {
-        0.0
-    } else {
-        1.5 * t - 0.5 * t * t * t
+/// The variogram family + shape parameters the joint fitter optimizes ranges
+/// for. Ranges, nugget, and sill are fitted; the shape(s) are held fixed at the
+/// caller's value (the 5-parameter optimizer has no shape dimension).
+#[derive(Debug, Clone, Copy)]
+pub struct ModelForm {
+    pub variogram_type: VariogramType,
+    pub shape1: Option<Real>,
+    pub shape2: Option<Real>,
+}
+
+impl ModelForm {
+    /// Spherical, no shape -- the historical default.
+    pub fn spherical() -> Self {
+        Self {
+            variogram_type: VariogramType::Spherical,
+            shape1: None,
+            shape2: None,
+        }
+    }
+
+    /// Semivariance of this family at `distance` for the given
+    /// `(nugget, sill, range)`. Constructs a `VariogramModel` and defers to its
+    /// per-family evaluator, so every family the crate supports is honored.
+    /// An infeasible `(nugget, sill, range, shape)` combination yields
+    /// `Real::INFINITY` so the optimizer rejects it.
+    #[inline]
+    fn gamma(&self, distance: Real, nugget: Real, sill: Real, range: Real) -> Real {
+        match VariogramModel::new_with_shapes(
+            nugget,
+            sill,
+            range,
+            self.variogram_type,
+            self.shape1.unwrap_or(0.0),
+            self.shape2,
+        ) {
+            Ok(model) => model.semivariance(distance),
+            Err(_) => Real::INFINITY,
+        }
+    }
+
+    /// Assemble a `Spherical3DJointFit` from optimized parameters, stamping in
+    /// this form's family and shapes.
+    fn fit(
+        &self,
+        nugget: Real,
+        sill: Real,
+        range_major: Real,
+        range_minor: Real,
+        range_vertical: Real,
+        residuals: Real,
+    ) -> Spherical3DJointFit {
+        Spherical3DJointFit {
+            nugget,
+            sill,
+            range_major,
+            range_minor,
+            range_vertical,
+            residuals,
+            variogram_type: self.variogram_type,
+            shape1: self.shape1,
+            shape2: self.shape2,
+        }
     }
 }
 
-#[inline]
-fn spherical_gamma(distance: Real, nugget: Real, sill: Real, range: Real) -> Real {
-    if range <= 0.0 {
-        return nugget;
-    }
-    nugget + (sill - nugget) * spherical_kernel(distance / range)
-}
-
-fn axis_residuals(empirical: &EmpiricalVariogram, nugget: Real, sill: Real, range: Real) -> Real {
+fn axis_residuals(
+    form: &ModelForm,
+    empirical: &EmpiricalVariogram,
+    nugget: Real,
+    sill: Real,
+    range: Real,
+) -> Real {
     empirical
         .distances
         .iter()
         .zip(empirical.semivariances.iter())
         .zip(empirical.n_pairs.iter())
         .map(|((d, y), w)| {
-            let diff = y - spherical_gamma(*d, nugget, sill, range);
+            let diff = y - form.gamma(*d, nugget, sill, range);
             (*w as Real) * diff * diff
         })
         .sum()
@@ -297,6 +358,7 @@ fn axis_residuals(empirical: &EmpiricalVariogram, nugget: Real, sill: Real, rang
 
 #[allow(clippy::too_many_arguments)]
 fn joint_residuals(
+    form: &ModelForm,
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
     vertical: &EmpiricalVariogram,
@@ -306,9 +368,9 @@ fn joint_residuals(
     range_minor: Real,
     range_vertical: Real,
 ) -> Real {
-    axis_residuals(major, nugget, sill, range_major)
-        + axis_residuals(minor, nugget, sill, range_minor)
-        + axis_residuals(vertical, nugget, sill, range_vertical)
+    axis_residuals(form, major, nugget, sill, range_major)
+        + axis_residuals(form, minor, nugget, sill, range_minor)
+        + axis_residuals(form, vertical, nugget, sill, range_vertical)
 }
 
 /// Initial guess for `(nugget, sill, range)` from a single experimental
@@ -360,6 +422,7 @@ fn joint_params_ok(p: &[Real; 5]) -> bool {
 /// pairs contribute more to the loss.
 #[allow(clippy::needless_range_loop)]
 pub fn fit_spherical_3d_joint(
+    form: ModelForm,
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
     vertical: &EmpiricalVariogram,
@@ -397,7 +460,7 @@ pub fn fit_spherical_3d_joint(
         if !joint_params_ok(&p) {
             return Real::INFINITY;
         }
-        joint_residuals(major, minor, vertical, p[0], p[1], p[2], p[3], p[4])
+        joint_residuals(&form, major, minor, vertical, p[0], p[1], p[2], p[3], p[4])
     };
 
     let mut start_val = eval(start);
@@ -567,14 +630,7 @@ pub fn fit_spherical_3d_joint(
             "3-D spherical joint fit did not converge to a finite residual".to_string(),
         ));
     }
-    Ok(Spherical3DJointFit {
-        nugget: p[0],
-        sill: p[1],
-        range_major: p[2],
-        range_minor: p[3],
-        range_vertical: p[4],
-        residuals,
-    })
+    Ok(form.fit(p[0], p[1], p[2], p[3], p[4], residuals))
 }
 
 // -----------------------------------------------------------------------------
@@ -621,6 +677,7 @@ pub fn fit_spherical_3d_joint(
 /// unbounded experimental variogram is taken as the sample
 /// variance"). Pass 0 to opt out (treat sill as fully free).
 pub fn fit_spherical_3d_two_stage(
+    form: ModelForm,
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
     vertical: &EmpiricalVariogram,
@@ -661,7 +718,7 @@ pub fn fit_spherical_3d_two_stage(
             if nugget < 0.0 || nugget >= sill_anchor || range <= 0.0 {
                 return Real::INFINITY;
             }
-            axis_residuals(vertical, nugget, sill_anchor, range)
+            axis_residuals(&form, vertical, nugget, sill_anchor, range)
         };
         let start: [Real; 2] = [n0.max(0.0).min(sill_anchor * 0.5), r0_v.max(Real::EPSILON)];
         let steps = [(sill_anchor * 0.05).max(1e-6), (start[1] * 0.10).max(1e-6)];
@@ -682,7 +739,7 @@ pub fn fit_spherical_3d_two_stage(
             if nugget < 0.0 || sill <= nugget || range <= 0.0 {
                 return Real::INFINITY;
             }
-            axis_residuals(vertical, nugget, sill, range)
+            axis_residuals(&form, vertical, nugget, sill, range)
         };
         let s0 = initial_axis_guess(vertical).1;
         let start: [Real; 3] = [
@@ -715,8 +772,8 @@ pub fn fit_spherical_3d_two_stage(
         if range_major <= 0.0 || range_minor <= 0.0 {
             return Real::INFINITY;
         }
-        axis_residuals(major, nugget_fit, sill_fit, range_major)
-            + axis_residuals(minor, nugget_fit, sill_fit, range_minor)
+        axis_residuals(&form, major, nugget_fit, sill_fit, range_major)
+            + axis_residuals(&form, minor, nugget_fit, sill_fit, range_minor)
     };
     let stage2_start: [Real; 2] = [r0_maj.max(Real::EPSILON), r0_min.max(Real::EPSILON)];
     let stage2_steps = [
@@ -733,15 +790,15 @@ pub fn fit_spherical_3d_two_stage(
     // Recompute stage 1's residuals from the final parameters so the
     // returned value covers both the anchored-2D and unanchored-3D
     // branches uniformly.
-    let stage1_residuals = axis_residuals(vertical, nugget_fit, sill_fit, range_vertical_fit);
-    Ok(Spherical3DJointFit {
-        nugget: nugget_fit,
-        sill: sill_fit,
-        range_major: stage2_best.0[0],
-        range_minor: stage2_best.0[1],
-        range_vertical: range_vertical_fit,
-        residuals: stage1_residuals + stage2_best.1,
-    })
+    let stage1_residuals = axis_residuals(&form, vertical, nugget_fit, sill_fit, range_vertical_fit);
+    Ok(form.fit(
+        nugget_fit,
+        sill_fit,
+        stage2_best.0[0],
+        stage2_best.0[1],
+        range_vertical_fit,
+        stage1_residuals + stage2_best.1,
+    ))
 }
 
 /// Refit the spherical model with `nugget` held at a user-supplied
@@ -751,6 +808,7 @@ pub fn fit_spherical_3d_two_stage(
 /// ranges via 4-D Nelder-Mead against all three axes simultaneously,
 /// pair-weighted just like the joint fit.
 pub fn fit_spherical_3d_with_fixed_nugget(
+    form: ModelForm,
     major: &EmpiricalVariogram,
     minor: &EmpiricalVariogram,
     vertical: &EmpiricalVariogram,
@@ -795,9 +853,9 @@ pub fn fit_spherical_3d_with_fixed_nugget(
         if sill <= nugget || r_major <= 0.0 || r_minor <= 0.0 || r_vertical <= 0.0 {
             return Real::INFINITY;
         }
-        axis_residuals(major, nugget, sill, r_major)
-            + axis_residuals(minor, nugget, sill, r_minor)
-            + axis_residuals(vertical, nugget, sill, r_vertical)
+        axis_residuals(&form, major, nugget, sill, r_major)
+            + axis_residuals(&form, minor, nugget, sill, r_minor)
+            + axis_residuals(&form, vertical, nugget, sill, r_vertical)
     };
     let start: [Real; 4] = [
         sill0,
@@ -817,14 +875,14 @@ pub fn fit_spherical_3d_with_fixed_nugget(
             "fixed-nugget fit did not converge".to_string(),
         ));
     }
-    Ok(Spherical3DJointFit {
+    Ok(form.fit(
         nugget,
-        sill: best.0[0],
-        range_major: best.0[1],
-        range_minor: best.0[2],
-        range_vertical: best.0[3],
-        residuals: best.1,
-    })
+        best.0[0],
+        best.0[1],
+        best.0[2],
+        best.0[3],
+        best.1,
+    ))
 }
 
 // -----------------------------------------------------------------------------
@@ -1211,21 +1269,44 @@ mod tests {
     /// Synthesize an axis-aligned experimental variogram by sampling
     /// the true spherical model at given lag distances; n_pairs = 10 at
     /// every bin (uniform weighting).
+    /// Synthesize an axis-aligned experimental variogram by sampling the given
+    /// family at the given lags (n_pairs = 10 everywhere, uniform weighting).
+    fn synth_axis(
+        vt: VariogramType,
+        shape1: Option<Real>,
+        shape2: Option<Real>,
+        distances: &[Real],
+        nugget: Real,
+        sill: Real,
+        range: Real,
+    ) -> EmpiricalVariogram {
+        let model =
+            VariogramModel::new_with_shapes(nugget, sill, range, vt, shape1.unwrap_or(0.0), shape2)
+                .expect("valid synthetic model params");
+        let semivariances: Vec<Real> = distances.iter().map(|d| model.semivariance(*d)).collect();
+        EmpiricalVariogram {
+            distances: distances.to_vec(),
+            semivariances,
+            n_pairs: vec![10; distances.len()],
+        }
+    }
+
+    /// Spherical convenience wrapper for the existing spherical fit tests.
     fn synth_spherical(
         distances: &[Real],
         nugget: Real,
         sill: Real,
         range: Real,
     ) -> EmpiricalVariogram {
-        let semivariances: Vec<Real> = distances
-            .iter()
-            .map(|d| spherical_gamma(*d, nugget, sill, range))
-            .collect();
-        EmpiricalVariogram {
-            distances: distances.to_vec(),
-            semivariances,
-            n_pairs: vec![10; distances.len()],
-        }
+        synth_axis(
+            VariogramType::Spherical,
+            None,
+            None,
+            distances,
+            nugget,
+            sill,
+            range,
+        )
     }
 
     #[test]
@@ -1236,7 +1317,7 @@ mod tests {
         let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
         let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
 
-        let fit = fit_spherical_3d_joint(&major, &minor, &vertical).unwrap();
+        let fit = fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, truth.0 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
@@ -1256,12 +1337,43 @@ mod tests {
         let minor = synth_spherical(&lags_minor, nugget, sill, 25.0);
         let vertical = synth_spherical(&lags_vertical, nugget, sill, 8.0);
 
-        let fit = fit_spherical_3d_joint(&major, &minor, &vertical).unwrap();
+        let fit = fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, nugget as f64, epsilon = 5e-2);
         approx::assert_relative_eq!(fit.sill as f64, sill as f64, epsilon = 5e-2);
         approx::assert_relative_eq!(fit.range_major as f64, 40.0, epsilon = 2.0);
         approx::assert_relative_eq!(fit.range_minor as f64, 25.0, epsilon = 2.0);
         approx::assert_relative_eq!(fit.range_vertical as f64, 8.0, epsilon = 2.0);
+    }
+
+    #[test]
+    fn joint_fit_recovers_gaussian_truth() {
+        // The generalized fitter must recover a *non-spherical* family.
+        // Synthesize gaussian axes and confirm the joint fit, told to fit
+        // gaussian, records the type and recovers the ranges.
+        let nugget: Real = 0.05;
+        let sill: Real = 1.0;
+        let lags_major: Vec<Real> = (1..=12).map(|i| i as Real * 5.0).collect();
+        let lags_minor: Vec<Real> = (1..=12).map(|i| i as Real * 3.0).collect();
+        let lags_vertical: Vec<Real> = (1..=12).map(|i| i as Real * 2.0).collect();
+        let g = |lags: &[Real], range: Real| {
+            synth_axis(VariogramType::Gaussian, None, None, lags, nugget, sill, range)
+        };
+        let major = g(&lags_major, 40.0);
+        let minor = g(&lags_minor, 25.0);
+        let vertical = g(&lags_vertical, 15.0);
+
+        let form = ModelForm {
+            variogram_type: VariogramType::Gaussian,
+            shape1: None,
+            shape2: None,
+        };
+        let fit = fit_spherical_3d_joint(form, &major, &minor, &vertical).unwrap();
+        assert_eq!(fit.variogram_type, VariogramType::Gaussian);
+        approx::assert_relative_eq!(fit.nugget as f64, nugget as f64, epsilon = 5e-2);
+        approx::assert_relative_eq!(fit.sill as f64, sill as f64, epsilon = 5e-2);
+        approx::assert_relative_eq!(fit.range_major as f64, 40.0, epsilon = 2.5);
+        approx::assert_relative_eq!(fit.range_minor as f64, 25.0, epsilon = 2.5);
+        approx::assert_relative_eq!(fit.range_vertical as f64, 15.0, epsilon = 2.5);
     }
 
     #[test]
@@ -1277,7 +1389,7 @@ mod tests {
 
         // Pass the true variance as the sill anchor so the test
         // exercises the anchored path (the common case from JS).
-        let fit = fit_spherical_3d_two_stage(&major, &minor, &vertical, truth.1).unwrap();
+        let fit = fit_spherical_3d_two_stage(ModelForm::spherical(), &major, &minor, &vertical, truth.1).unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, truth.0 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
@@ -1324,7 +1436,7 @@ mod tests {
         horizontal.n_pairs.insert(0, 5);
 
         let two_stage =
-            fit_spherical_3d_two_stage(&horizontal, &horizontal, &vertical, sill).unwrap();
+            fit_spherical_3d_two_stage(ModelForm::spherical(), &horizontal, &horizontal, &vertical, sill).unwrap();
         // Two-stage's nugget comes from vertical alone, so it should
         // land near the truth.
         approx::assert_relative_eq!(two_stage.nugget as f64, nugget as f64, epsilon = 5e-2);
@@ -1332,7 +1444,7 @@ mod tests {
         // Joint fit gets pulled toward zero by the noisy small-lag
         // bins. This snapshot documents the problem two-stage solves;
         // remove the assertion if the joint fit gets smarter.
-        let joint = fit_spherical_3d_joint(&horizontal, &horizontal, &vertical).unwrap();
+        let joint = fit_spherical_3d_joint(ModelForm::spherical(), &horizontal, &horizontal, &vertical).unwrap();
         assert!(
             joint.nugget < nugget * 0.5,
             "expected joint fit to underestimate nugget on noisy small-lag bins (got {} vs true {})",
@@ -1352,7 +1464,7 @@ mod tests {
         let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
         let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
 
-        let fit = fit_spherical_3d_with_fixed_nugget(&major, &minor, &vertical, 0.3).unwrap();
+        let fit = fit_spherical_3d_with_fixed_nugget(ModelForm::spherical(), &major, &minor, &vertical, 0.3).unwrap();
         // f32 precision: the constant 0.3 cast to f32 is not exactly 0.3;
         // allow ulp-scale jitter.
         approx::assert_relative_eq!(fit.nugget as f64, 0.3, epsilon = 1e-6);
@@ -1369,9 +1481,9 @@ mod tests {
             semivariances: vec![],
             n_pairs: vec![],
         };
-        assert!(fit_spherical_3d_joint(&empty, &nonempty, &nonempty).is_err());
-        assert!(fit_spherical_3d_joint(&nonempty, &empty, &nonempty).is_err());
-        assert!(fit_spherical_3d_joint(&nonempty, &nonempty, &empty).is_err());
+        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &empty, &nonempty, &nonempty).is_err());
+        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &empty, &nonempty).is_err());
+        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &nonempty, &empty).is_err());
     }
 
     #[test]

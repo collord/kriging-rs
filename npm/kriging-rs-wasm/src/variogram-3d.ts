@@ -113,6 +113,21 @@ function axisArrays(
 }
 
 /**
+ * Trailing `(variogramType, shape1, shape2)` args the WASM fit functions take.
+ * Defaults to `"spherical"`; absent shapes are passed as `NaN`, which the Rust
+ * side reads as "no shape" (shape-free families ignore them).
+ */
+function modelFormArgs(
+  options: FitSpherical3DOptions
+): [string, number, number] {
+  return [
+    options.variogramType ?? "spherical",
+    options.shape ?? Number.NaN,
+    options.shape2 ?? Number.NaN,
+  ];
+}
+
+/**
  * Joint least-squares fit of a 3-D anisotropic spherical variogram across
  * three axis-aligned experimental variograms (major / minor / vertical).
  * Bins are weighted by pair count.
@@ -130,7 +145,8 @@ export function fitSpherical3DJoint(
     out = fn(
       ...axisArrays(options.major),
       ...axisArrays(options.minor),
-      ...axisArrays(options.vertical)
+      ...axisArrays(options.vertical),
+      ...modelFormArgs(options)
     );
   } catch (e) {
     throw wrapThrown(e);
@@ -157,7 +173,8 @@ export function fitSpherical3DTwoStage(
       ...axisArrays(options.major),
       ...axisArrays(options.minor),
       ...axisArrays(options.vertical),
-      options.dataVariance ?? 0
+      options.dataVariance ?? 0,
+      ...modelFormArgs(options)
     );
   } catch (e) {
     throw wrapThrown(e);
@@ -183,7 +200,8 @@ export function fitSpherical3DFixedNugget(
       ...axisArrays(options.major),
       ...axisArrays(options.minor),
       ...axisArrays(options.vertical),
-      options.nugget
+      options.nugget,
+      ...modelFormArgs(options)
     );
   } catch (e) {
     throw wrapThrown(e);

@@ -4101,6 +4101,52 @@ describe("3-D directional variogram and spherical fits", () => {
     expect(oneD.sill).toBeGreaterThan(0);
     expect(oneD.range).toBeGreaterThan(0);
   });
+
+  test("joint fit honors a non-spherical family and records type + shape", () => {
+    const axis = computeDirectionalVariogram3D({
+      xs,
+      ys,
+      zs,
+      values,
+      lagDistance: 2,
+      nLags: 5,
+      azimuthDeg: 0,
+      azimuthToleranceDeg: 90,
+      dipDeg: 0,
+      dipToleranceDeg: 90,
+    });
+    const input = { major: axis, minor: axis, vertical: axis };
+
+    // Default (omitted type) still fits spherical and stamps the type.
+    const spherical = fitSpherical3DJoint(input);
+    expect(spherical.variogramType).toBe("spherical");
+    expect(spherical.shape).toBeNull();
+
+    const gaussian = fitSpherical3DJoint({ ...input, variogramType: "gaussian" });
+    expect(gaussian.variogramType).toBe("gaussian");
+    expect(gaussian.rangeMajor).toBeGreaterThan(0);
+
+    // A shaped family: the held shape round-trips onto the result.
+    const matern = fitSpherical3DJoint({
+      ...input,
+      variogramType: "matern",
+      shape: 1.5,
+    });
+    expect(matern.variogramType).toBe("matern");
+    expect(matern.shape).toBeCloseTo(1.5, 6);
+    expect(matern.shape2).toBeNull();
+
+    // Confluent-hypergeometric carries both shapes.
+    const ch = fitSpherical3DJoint({
+      ...input,
+      variogramType: "confluenthypergeometric",
+      shape: 1.0,
+      shape2: 2.0,
+    });
+    expect(ch.variogramType).toBe("confluenthypergeometric");
+    expect(ch.shape).toBeCloseTo(1.0, 6);
+    expect(ch.shape2).toBeCloseTo(2.0, 6);
+  });
 });
 
 describe("3-D sequential Gaussian simulation", () => {

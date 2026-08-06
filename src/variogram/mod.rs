@@ -23,7 +23,7 @@ pub use empirical::{
 };
 pub use experimental_3d::compute_empirical_variogram_3d;
 pub use fitting::{
-    FitResult, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
+    FitResult, ModelForm, Spherical3DJointFit, fit_spherical_3d_joint, fit_spherical_3d_two_stage,
     fit_spherical_3d_with_fixed_nugget, fit_variogram,
 };
 pub use models::{VariogramModel, VariogramType};
