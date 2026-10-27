@@ -85,6 +85,10 @@
 //! - `gpu` — WebGPU-based batch prediction (native and web).
 //! - `gpu-blocking` — Blocking GPU helpers on native (includes `gpu`).
 
+// The 3-D modules widen `Real` to `f64` for accumulation (`x as f64`). Those casts are
+// required in the default `f32` build and only become no-ops when `Real = f64`.
+#![cfg_attr(feature = "f64", allow(clippy::unnecessary_cast))]
+
 /// Floating-point type used for coordinates, values, and variogram parameters.
 ///
 /// Defaults to `f32`. Enable the `f64` Cargo feature to switch to double precision at the
