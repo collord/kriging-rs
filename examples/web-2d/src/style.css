@@ -1,0 +1,23 @@
+:root { --bg:#f7f7f5; --fg:#1d1d1f; --muted:#6b6b70; --card:#fff; --line:#dcdcd8; --accent:#2a6fdb; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17181a; --fg:#ececec; --muted:#9a9aa0; --card:#222326; --line:#3a3b3f; --accent:#6ea0ff; } }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+header { display:flex; align-items:baseline; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--line); }
+h1 { font-size:18px; margin:0; } h1 small { color:var(--muted); font-weight:400; }
+h2 { font-size:14px; margin:0 0 8px; }
+#status { color:var(--muted); font-variant-numeric: tabular-nums; }
+#status.busy::before { content:"⏳ "; } #status.err { color:#d33; }
+main { display:grid; grid-template-columns: 260px 1fr; gap:16px; padding:16px 20px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.controls fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:10px 12px; background:var(--card); }
+.controls legend { font-weight:600; padding:0 4px; }
+.controls label { display:block; margin:6px 0; }
+.controls select, .controls input[type=number] { margin-left:6px; }
+.row { display:flex; gap:8px; align-items:center; margin:6px 0; } .toggle label { margin:0; }
+.info { color:var(--muted); font-size:12px; font-variant-numeric: tabular-nums; white-space:pre-line; }
+.plots { display:grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap:16px; align-content:start; min-width:0; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
+svg { width:100%; height:auto; color:var(--fg); }
+.mapwrap { display:flex; gap:8px; align-items:flex-start; }
+#map { flex:1 1 auto; min-width:0; max-width:520px; width:100%; height:auto; border:1px solid var(--line); }
+#legend { flex:0 0 64px; width:64px; height:auto; }

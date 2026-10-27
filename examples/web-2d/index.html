@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Site Kriging Starter</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Site kriging <small>projected x/y (m)</small></h1>
+      <div id="status">Loading WASM…</div>
+    </header>
+    <main>
+      <section class="controls">
+        <fieldset>
+          <legend>Data</legend>
+          <label class="file">Load CSV (x,y,value) <input type="file" id="csv" accept=".csv,text/csv" /></label>
+          <div class="row">
+            <button id="synth">Synthetic</button>
+            <select id="synthN">
+              <option value="300" selected>300 pts</option>
+              <option value="1000">1 000 pts</option>
+              <option value="3000">3 000 pts</option>
+              <option value="5000">5 000 pts</option>
+            </select>
+          </div>
+          <div id="dataInfo" class="info"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Variogram</legend>
+          <label>Model
+            <select id="family">
+              <option value="spherical" selected>Spherical</option>
+              <option value="exponential">Exponential</option>
+              <option value="gaussian">Gaussian</option>
+              <option value="cubic">Cubic</option>
+              <option value="stable">Stable</option>
+              <option value="matern">Matérn</option>
+              <option value="holeeffect">Hole effect</option>
+            </select>
+          </label>
+          <label>Lag bins <input type="number" id="nBins" value="15" min="4" max="40" /></label>
+          <div id="vgInfo" class="info"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Grid</legend>
+          <label>Resolution
+            <select id="res">
+              <option value="50">50 × 50</option>
+              <option value="100">100 × 100</option>
+              <option value="200" selected>200 × 200</option>
+            </select>
+          </label>
+          <label>Neighbours <input type="number" id="nbrs" value="32" min="4" max="128" /></label>
+          <div class="row toggle">
+            <label><input type="radio" name="layer" value="estimate" checked /> Estimate</label>
+            <label><input type="radio" name="layer" value="variance" /> Kriging variance</label>
+          </div>
+          <label><input type="checkbox" id="showPts" checked /> Show samples</label>
+          <div id="gridInfo" class="info"></div>
+        </fieldset>
+      </section>
+      <section class="plots">
+        <div class="card">
+          <h2>Experimental variogram</h2>
+          <svg id="vgPlot" viewBox="0 0 460 300"></svg>
+        </div>
+        <div class="card">
+          <h2 id="mapTitle">Kriged estimate</h2>
+          <div class="mapwrap">
+            <canvas id="map" width="520" height="520"></canvas>
+            <canvas id="legend" width="80" height="520"></canvas>
+          </div>
+          <div id="hover" class="info">&nbsp;</div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // kriging-rs-wasm's .d.ts files declare [Symbol.dispose], so consumers need
+    // ESNext.Disposable even though the runtime target is ES2022.
+    "lib": ["ES2022", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": false,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "scripts"]
+}
