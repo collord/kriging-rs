@@ -92,6 +92,13 @@ import {
   fitVariogram3DJoint,
   fitVariogram3DTwoStage,
   gaussianSimulation3D,
+  cokrige,
+  cokrigeCollocated,
+  collocatedCosimulate,
+  collocatedSecondaryFromPaired,
+  computeCrossVariogram,
+  cosimulateMultiVariable,
+  fitLmc,
   type OrdinaryPrediction,
   type BinomialPrediction,
   type VariogramTypeName,
@@ -4681,5 +4688,166 @@ describe("3-D fitter names", () => {
     expect(fitSpherical3DJoint).toBe(fitVariogram3DJoint);
     expect(fitSpherical3DTwoStage).toBe(fitVariogram3DTwoStage);
     expect(fitSpherical3DFixedNugget).toBe(fitVariogram3DFixedNugget);
+  });
+});
+
+describe("Cokriging", () => {
+  // Two correlated variables on a ~10 km lat/lon patch: z2 = 0.8 z1 + independent noise.
+  const n = 60;
+  const lats = Array.from(
+    { length: n },
+    (_, i) => 37.7 + ((i * 37) % 59) * 0.0015
+  );
+  const lons = Array.from(
+    { length: n },
+    (_, i) => -122.5 + ((i * 53) % 61) * 0.0015
+  );
+  const z1 = lats.map(
+    (lat, i) =>
+      10 +
+      3 * Math.sin((lat - 37.7) * 90) +
+      2 * Math.cos((lons[i] + 122.5) * 70)
+  );
+  const z2 = z1.map((v, i) => 0.8 * v + Math.sin(i * 1.7));
+  const variogram = {
+    variogramType: "spherical" as const,
+    nugget: 0,
+    sill: 4,
+    range: 6,
+  };
+  const targetLats = [37.73, 37.76, 37.79];
+  const targetLons = [-122.47, -122.45, -122.43];
+  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+
+  test("collocatedSecondaryFromPaired reproduces the sample moments", () => {
+    const sec = collocatedSecondaryFromPaired(z1, z2);
+    const m1 = mean(z1),
+      m2 = mean(z2);
+    const s1 = Math.sqrt(mean(z1.map((v) => (v - m1) ** 2)));
+    const s2 = Math.sqrt(mean(z2.map((v) => (v - m2) ** 2)));
+    const r = mean(z1.map((v, i) => (v - m1) * (z2[i] - m2))) / (s1 * s2);
+    expect(sec.mean).toBeCloseTo(m2, 3);
+    // The library reports the sample (n - 1) standard deviation.
+    expect(sec.stdDev).toBeCloseTo(s2 * Math.sqrt(n / (n - 1)), 3);
+    expect(sec.correlation).toBeCloseTo(r, 2);
+  });
+
+  test("collocated cokriging with zero correlation reduces to simple kriging", () => {
+    const primaryMean = mean(z1);
+    const out = cokrigeCollocated({
+      lats,
+      lons,
+      values: z1,
+      variogram,
+      primaryMean,
+      secondary: { mean: 0, stdDev: 1, correlation: 0 },
+      targetLats,
+      targetLons,
+      targetSecondaryValues: [5, -5, 0],
+    });
+    using sk = new SimpleKriging({
+      lats,
+      lons,
+      values: z1,
+      variogram,
+      mean: primaryMean,
+    });
+    out.forEach((p, i) => {
+      const ref = sk.predict(targetLats[i], targetLons[i]);
+      expect(p.value).toBeCloseTo(ref.value, 3);
+      expect(p.variance).toBeCloseTo(ref.variance, 3);
+    });
+  });
+
+  test("fitLmc output drives cokrige, which honours the data", () => {
+    const lmc = fitLmc({
+      lats,
+      lons,
+      variables: [z1, z2],
+      nBins: 10,
+      bases: [{ nugget: true }, { variogram }],
+    });
+    expect(lmc.coregionalization.structures).toHaveLength(2);
+    for (const s of lmc.coregionalization.structures) {
+      const [[a, b], [c, d]] = s.sills;
+      expect(b).toBeCloseTo(c, 6); // symmetric
+      expect(a * d - b * c).toBeGreaterThanOrEqual(-1e-6); // positive semidefinite
+    }
+    const preds = cokrige({
+      data: { lats, lons, variables: [z1, z2] },
+      coregionalization: lmc.coregionalization,
+      kind: { type: "ordinary" },
+      targetVariable: 0,
+      targetLats: [...targetLats, lats[7]],
+      targetLons: [...targetLons, lons[7]],
+    });
+    expect(preds).toHaveLength(4);
+    for (const p of preds) {
+      expect(Number.isFinite(p.value)).toBe(true);
+      expect(p.variance).toBeGreaterThanOrEqual(0);
+    }
+    expect(preds[3].value).toBeCloseTo(z1[7], 1);
+  });
+
+  test("computeCrossVariogram returns symmetric p×p matrices per lag", () => {
+    const cv = computeCrossVariogram({
+      lats,
+      lons,
+      variables: [z1, z2],
+      nBins: 8,
+    });
+    expect(cv.nVariables).toBe(2);
+    expect(cv.distances.length).toBe(cv.gamma.length);
+    for (const g of cv.gamma) {
+      expect(g).toHaveLength(4);
+      expect(g[1]).toBeCloseTo(g[2], 8);
+    }
+  });
+
+  test("collocatedCosimulate returns one realization per target, fixed by the seed", () => {
+    const opts = {
+      conditioningLats: lats,
+      conditioningLons: lons,
+      conditioningValues: z1,
+      targetLats,
+      targetLons,
+      targetSecondaryValues: [8, 9, 10],
+      variogram,
+      primaryMean: mean(z1),
+      secondary: collocatedSecondaryFromPaired(z1, z2),
+    };
+    const a = collocatedCosimulate({ ...opts, seed: 3 });
+    const b = collocatedCosimulate({ ...opts, seed: 3 });
+    expect(a).toHaveLength(3);
+    expect(Array.from(a)).toEqual(Array.from(b));
+    for (const v of a) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  test("cosimulateMultiVariable is deterministic per seed", () => {
+    const coregionalization = {
+      structures: [
+        {
+          basis: { variogram },
+          sills: [
+            [4, 3],
+            [3, 3.5],
+          ],
+        },
+      ],
+    };
+    const opts = {
+      data: { lats, lons, variables: [z1, z2] },
+      coregionalization,
+      means: [mean(z1), mean(z2)],
+      targetLats,
+      targetLons,
+    };
+    const a = cosimulateMultiVariable({ ...opts, seed: 11 });
+    const b = cosimulateMultiVariable({ ...opts, seed: 11 });
+    const c = cosimulateMultiVariable({ ...opts, seed: 12 });
+    expect(a.nVariables).toBe(2);
+    expect(a.nTargets).toBe(3);
+    expect(a.samples).toEqual(b.samples);
+    expect(a.samples).not.toEqual(c.samples);
   });
 });
