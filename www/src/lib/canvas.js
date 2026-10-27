@@ -212,7 +212,7 @@ export function renderVariogramPlot(
   ctx.fillStyle = "#444";
   ctx.font = "12px sans-serif";
   ctx.fillText("Semivariance", 8, padding - 8);
-  ctx.fillText("Distance", width - 85, height - 8);
+  ctx.fillText("Distance (km)", width - 105, height - 8);
   ctx.fillStyle = "#1f4e79";
   ctx.fillRect(width - 220, 12, 10, 10);
   ctx.fillStyle = "#444";

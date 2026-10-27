@@ -3,6 +3,7 @@ import {
   OrdinaryKriging,
   BinomialKriging,
   VariogramType,
+  computeEmpiricalVariogram,
   fitVariogram,
   evaluateNestedVariogram,
 } from "kriging-rs-wasm";
@@ -14,7 +15,6 @@ import {
   summarizeTimings,
   summarizePhaseShares,
 } from "../lib/sampleData";
-import { computeEmpiricalVariogram } from "../lib/variogram";
 import HelpTip, { FieldLabel } from "./HelpTip";
 import { VariogramMathHelp } from "../help/variogramMath.jsx";
 import {
@@ -291,6 +291,8 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
       let predictions;
       let samplePredictions;
       let observedValues;
+      // The values the variogram was fitted on (logits for binomial), for the variogram plot.
+      let variogramValues;
       let selector;
       let fittedVariogram = null;
 
@@ -331,6 +333,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         model.free();
         selector = (e) => e.prevalence;
         observedValues = sample.successes.map((s, i) => s / sample.trials[i]);
+        variogramValues = sampleLogits;
       } else {
         const sampleLats = Float64Array.from(sample.lats);
         const sampleLons = Float64Array.from(sample.lons);
@@ -359,6 +362,7 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
         model.free();
         selector = (e) => e.value;
         observedValues = sample.values;
+        variogramValues = sampleValues;
       }
 
       const residuals = samplePredictions.map((entry, i) => observedValues[i] - selector(entry));
@@ -397,12 +401,20 @@ export default function SurfaceDemo({ uploadedData, onError, webgpuStatus }) {
           rmse: stats.rmse.toFixed(4),
         });
       }
-      const variogramPoints = computeEmpiricalVariogram(
-        sample.lats,
-        sample.lons,
-        observedValues,
-        options.nBins,
-      );
+      // Same estimator, bins, and units (Haversine km) as the fit, so the empirical points
+      // and the model curve share one distance axis.
+      const empirical = computeEmpiricalVariogram({
+        sampleLats: sample.lats,
+        sampleLons: sample.lons,
+        values: variogramValues,
+        nBins: options.nBins,
+        maxDistance: options.maxDistance,
+      });
+      const variogramPoints = Array.from(empirical.distances, (distance, i) => ({
+        distance,
+        semivariance: empirical.semivariances[i],
+        count: empirical.counts[i],
+      }));
       const modelCurve = buildFittedVariogramCurve(fittedVariogram, variogramPoints);
       if (vCtx) {
         renderVariogramPlot(
