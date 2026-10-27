@@ -80,7 +80,8 @@ fn semivariance(distance: f32, variogram_type: u32, nugget: f32, sill: f32, rang
             return sill;
         }
         let x = d / r;
-        let poly = 7.0 * x * x - 8.5 * x * x * x + 3.5 * pow(x, 5.0) - 0.5 * pow(x, 7.0);
+        // Same standard cubic as VariogramModel (Chilès & Delfiner 2012): equals 1 at x = 1.
+        let poly = 7.0 * x * x - 8.75 * x * x * x + 3.5 * pow(x, 5.0) - 0.75 * pow(x, 7.0);
         return nugget + partial * poly;
     }
     if variogram_type == 4u {
@@ -187,6 +188,12 @@ fn encode_variogram_params(
         }
         VariogramType::HoleEffect => {
             return Err("Hole-effect variogram is not supported on GPU; use CPU path".to_string());
+        }
+        VariogramType::ConfluentHypergeometric => {
+            return Err(
+                "Confluent-hypergeometric variogram is not supported on GPU; use CPU path"
+                    .to_string(),
+            );
         }
     };
     Ok(VariogramGpuParams {
@@ -415,4 +422,46 @@ pub fn build_rhs_covariances_gpu_blocking(
         pred_coords,
         variogram,
     ))
+}
+
+#[cfg(all(test, feature = "gpu-blocking", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::distance::haversine_distance;
+
+    /// The WGSL kernel re-implements the variogram families, so pin it to the CPU models:
+    /// a stale cubic polynomial and `γ(0) = nugget` both slipped through before this test.
+    /// Skips (passes) when the machine has no GPU adapter.
+    #[test]
+    fn gpu_covariances_match_cpu_for_every_supported_family() {
+        if !detect_gpu_support_blocking().available {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        }
+        let c = |lat, lon| GeoCoord::try_new(lat, lon).unwrap();
+        let train = [c(0.0, 0.0), c(0.03, 0.01), c(0.05, 0.08)];
+        // The first target coincides with a station (distance exactly 0).
+        let pred = [c(0.0, 0.0), c(0.01, 0.02), c(0.04, 0.04), c(0.2, 0.2)];
+        let models = [
+            VariogramModel::new(0.2, 1.0, 8.0, VariogramType::Spherical).unwrap(),
+            VariogramModel::new(0.2, 1.0, 8.0, VariogramType::Exponential).unwrap(),
+            VariogramModel::new(0.2, 1.0, 8.0, VariogramType::Gaussian).unwrap(),
+            VariogramModel::new(0.2, 1.0, 8.0, VariogramType::Cubic).unwrap(),
+            VariogramModel::new_with_shape(0.2, 1.0, 8.0, VariogramType::Stable, 1.5).unwrap(),
+        ];
+        for vg in models {
+            let gpu = build_rhs_covariances_gpu_blocking(&train, &pred, vg).unwrap();
+            for (p, &target) in pred.iter().enumerate() {
+                for (t, &station) in train.iter().enumerate() {
+                    let cpu = vg.covariance(haversine_distance(station, target)).max(0.0);
+                    let got = gpu[p * train.len() + t];
+                    assert!(
+                        (got - cpu).abs() < 1e-3,
+                        "{:?} pred {p} train {t}: gpu {got} vs cpu {cpu}",
+                        vg.variogram_type()
+                    );
+                }
+            }
+        }
+    }
 }
