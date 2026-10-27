@@ -2008,8 +2008,9 @@ export interface AxisVariogramInput {
 }
 
 /**
- * Options for {@link fitSpherical3DJoint}: three axis-aligned experimental
- * variograms fitted jointly to one anisotropic spherical model.
+ * Options for {@link fitVariogram3DJoint}: three axis-aligned experimental
+ * variograms fitted jointly to one anisotropic model of `variogramType`
+ * (default spherical).
  */
 export interface FitSpherical3DOptions {
   major: AxisVariogramInput;
@@ -2028,7 +2029,7 @@ export interface FitSpherical3DOptions {
 }
 
 /**
- * Options for {@link fitSpherical3DTwoStage}. Stage 1 fits nugget, sill, and
+ * Options for {@link fitVariogram3DTwoStage}. Stage 1 fits nugget, sill, and
  * vertical range on the vertical experimental alone; stage 2 holds those and
  * fits the horizontal ranges.
  */
@@ -2042,7 +2043,7 @@ export interface FitSpherical3DTwoStageOptions extends FitSpherical3DOptions {
 }
 
 /**
- * Options for {@link fitSpherical3DFixedNugget}: refit with the nugget held at
+ * Options for {@link fitVariogram3DFixedNugget}: refit with the nugget held at
  * a user-supplied value (e.g. read off the vertical's short-lag intercept).
  */
 export interface FitSpherical3DFixedNuggetOptions extends FitSpherical3DOptions {
@@ -2051,9 +2052,10 @@ export interface FitSpherical3DFixedNuggetOptions extends FitSpherical3DOptions 
 }
 
 /**
- * A fitted 3-D anisotropic spherical variogram: one nugget and sill with
- * per-axis ranges. Drives 3-D kriging via {@link Anisotropy3DParams} (range
- * ratios) plus a spherical {@link VariogramParams} with `range: rangeMajor`.
+ * A fitted 3-D anisotropic variogram (of the family in `variogramType`): one
+ * nugget and sill with per-axis ranges. Drives 3-D kriging via
+ * {@link Anisotropy3DParams} (range ratios) plus a {@link VariogramParams} of the
+ * same family with `range: rangeMajor`. The name predates non-spherical fits.
  */
 export interface FittedSpherical3D {
   nugget: number;

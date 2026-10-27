@@ -1,13 +1,15 @@
 /**
  * 3-D variography: gamv-style directional experimental variograms and
- * anisotropic spherical model fitting (joint, two-stage, fixed-nugget, and
- * single-axis 1-D).
+ * anisotropic model fitting (joint, two-stage, fixed-nugget) for any variogram
+ * family, plus a single-axis 1-D spherical fit.
  *
  * The typical workflow mirrors GSLib practice: compute three directional
  * experimental variograms along the suspected major / minor / vertical axes
- * with {@link computeDirectionalVariogram3D}, then fit one anisotropic
- * spherical model across them with {@link fitSpherical3DJoint} (or the
- * two-stage / fixed-nugget variants for noisy drillhole-style data).
+ * with {@link computeDirectionalVariogram3D}, then fit one anisotropic model
+ * across them with {@link fitVariogram3DJoint} (or the two-stage /
+ * fixed-nugget variants for noisy drillhole-style data). The `fitSpherical3D*`
+ * names are deprecated aliases kept for compatibility; despite the name they
+ * fit whatever `variogramType` you pass (default spherical).
  *
  * @module
  */
@@ -128,14 +130,15 @@ function modelFormArgs(
 }
 
 /**
- * Joint least-squares fit of a 3-D anisotropic spherical variogram across
- * three axis-aligned experimental variograms (major / minor / vertical).
- * Bins are weighted by pair count.
+ * Joint least-squares fit of one 3-D anisotropic variogram across three
+ * axis-aligned experimental variograms (major / minor / vertical). Bins are
+ * weighted by pair count. Fits `options.variogramType` (default `"spherical"`);
+ * for shaped families the `shape` / `shape2` you pass are held fixed.
  *
  * @returns One nugget and sill with per-axis ranges; see {@link FittedSpherical3D}.
  * @throws {KrigingError} When the WASM module is not loaded or inputs are invalid.
  */
-export function fitSpherical3DJoint(
+export function fitVariogram3DJoint(
   options: FitSpherical3DOptions
 ): FittedSpherical3D {
   const mod = requireLoadedModule();
@@ -155,14 +158,14 @@ export function fitSpherical3DJoint(
 }
 
 /**
- * Two-stage spherical fit: nugget, sill, and vertical range are fitted on the
- * vertical experimental alone, then held while the horizontal ranges are
- * fitted. Avoids the joint fit's tendency to drive the nugget toward zero
+ * Two-stage 3-D fit (any `variogramType`, default spherical): nugget, sill, and
+ * vertical range are fitted on the vertical experimental alone, then held while
+ * the horizontal ranges are fitted. Avoids the joint fit's tendency to drive the nugget toward zero
  * when horizontal axes have noisy short-lag bins (typical drillhole pattern).
  *
  * @throws {KrigingError} When the WASM module is not loaded or inputs are invalid.
  */
-export function fitSpherical3DTwoStage(
+export function fitVariogram3DTwoStage(
   options: FitSpherical3DTwoStageOptions
 ): FittedSpherical3D {
   const mod = requireLoadedModule();
@@ -183,13 +186,13 @@ export function fitSpherical3DTwoStage(
 }
 
 /**
- * Refit the 3-D spherical model with the nugget held at a user-supplied value
- * (sill plus the three ranges are fitted). Used after a two-stage fit when
+ * Refit the 3-D model (any `variogramType`, default spherical) with the nugget
+ * held at a user-supplied value (sill plus the three ranges are fitted). Used after a two-stage fit when
  * the nugget has been read off the vertical's short-lag intercept manually.
  *
  * @throws {KrigingError} When the WASM module is not loaded or inputs are invalid.
  */
-export function fitSpherical3DFixedNugget(
+export function fitVariogram3DFixedNugget(
   options: FitSpherical3DFixedNuggetOptions
 ): FittedSpherical3D {
   const mod = requireLoadedModule();
@@ -209,8 +212,17 @@ export function fitSpherical3DFixedNugget(
   return mapFittedSpherical3D(out);
 }
 
+/** @deprecated Renamed to {@link fitVariogram3DJoint}; it fits any family, not only spherical. */
+export const fitSpherical3DJoint = fitVariogram3DJoint;
+
+/** @deprecated Renamed to {@link fitVariogram3DTwoStage}; it fits any family, not only spherical. */
+export const fitSpherical3DTwoStage = fitVariogram3DTwoStage;
+
+/** @deprecated Renamed to {@link fitVariogram3DFixedNugget}; it fits any family, not only spherical. */
+export const fitSpherical3DFixedNugget = fitVariogram3DFixedNugget;
+
 /**
- * Fit a 1-D spherical model to a single precomputed experimental variogram
+ * Fit a 1-D **spherical** model (spherical only) to a single precomputed experimental variogram
  * (e.g. one output of {@link computeDirectionalVariogram3D}). Useful for
  * scoring candidate orientations by fitted range during an anisotropy search.
  *

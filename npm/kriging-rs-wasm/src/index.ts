@@ -35,6 +35,9 @@ export {
   fitSpherical3DFixedNugget,
   fitSpherical3DJoint,
   fitSpherical3DTwoStage,
+  fitVariogram3DFixedNugget,
+  fitVariogram3DJoint,
+  fitVariogram3DTwoStage,
 } from "./variogram-3d.js";
 export { gaussianSimulation3D } from "./simulate-3d.js";
 export {

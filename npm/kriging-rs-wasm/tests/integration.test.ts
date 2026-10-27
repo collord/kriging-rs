@@ -88,6 +88,9 @@ import {
   fitSpherical3DFixedNugget,
   fitSpherical3DJoint,
   fitSpherical3DTwoStage,
+  fitVariogram3DFixedNugget,
+  fitVariogram3DJoint,
+  fitVariogram3DTwoStage,
   gaussianSimulation3D,
   type OrdinaryPrediction,
   type BinomialPrediction,
@@ -4660,5 +4663,13 @@ describe("ProjectedKriging: defaults, neighborhood, fromFitted, predictGrid", ()
         yCells: 2,
       })
     ).toThrow(KrigingError);
+  });
+});
+
+describe("3-D fitter names", () => {
+  test("fitSpherical3D* are aliases of the family-neutral fitVariogram3D* functions", () => {
+    expect(fitSpherical3DJoint).toBe(fitVariogram3DJoint);
+    expect(fitSpherical3DTwoStage).toBe(fitVariogram3DTwoStage);
+    expect(fitSpherical3DFixedNugget).toBe(fitVariogram3DFixedNugget);
   });
 });
