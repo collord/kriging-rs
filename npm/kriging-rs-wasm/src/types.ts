@@ -634,6 +634,28 @@ export interface FitVariogramOptions {
 }
 
 /**
+ * Options for {@link fitVariogramProjected}: the planar `(x, y)` counterpart of
+ * {@link FitVariogramOptions}. Distances are Euclidean in the coordinates' units, so the
+ * fitted `range` (and `maxDistance`) are in those units too.
+ */
+export interface FitVariogramProjectedOptions {
+  /** Sample x coordinates (e.g. easting in metres). */
+  xs: NumericArrayInput;
+  /** Sample y coordinates (e.g. northing in metres). */
+  ys: NumericArrayInput;
+  /** Sample values (same length as `xs`/`ys`). */
+  values: NumericArrayInput;
+  /** Variogram model type: string (e.g. `"exponential"`) or {@link VariogramType} enum value. */
+  variogramType: VariogramTypeName | number;
+  /** Maximum pair separation to bin, in coordinate units; omit to use the largest separation. */
+  maxDistance?: number;
+  /** Number of distance bins for the empirical variogram (default 12). */
+  nBins?: number;
+  /** Empirical estimator: `"classical"` (default) or `"cressie-hawkins"` (robust). */
+  estimator?: EmpiricalEstimator;
+}
+
+/**
  * Variogram parameters for model construction (nugget, sill, range, optional shape).
  */
 export interface VariogramParams {
@@ -835,6 +857,22 @@ export interface ComputeEmpiricalVariogramOptions {
   /** Optional maximum distance for binning; omit for automatic choice. */
   maxDistance?: number;
   /** Number of distance bins for the empirical variogram (default 12). */
+  nBins?: number;
+  /** Estimator choice; defaults to `"classical"`. */
+  estimator?: EmpiricalEstimator;
+}
+
+/**
+ * Options for {@link computeEmpiricalVariogramProjected}: the planar `(x, y)` counterpart of
+ * {@link ComputeEmpiricalVariogramOptions} (Euclidean distances in coordinate units).
+ */
+export interface ComputeEmpiricalVariogramProjectedOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  values: NumericArrayInput;
+  /** Maximum pair separation to bin, in coordinate units; omit to use the largest separation. */
+  maxDistance?: number;
+  /** Number of distance bins (default 12). */
   nBins?: number;
   /** Estimator choice; defaults to `"classical"`. */
   estimator?: EmpiricalEstimator;

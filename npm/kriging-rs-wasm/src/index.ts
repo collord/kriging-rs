@@ -40,8 +40,10 @@ export { gaussianSimulation3D } from "./simulate-3d.js";
 export {
   computeDirectionalEmpiricalVariogram,
   computeEmpiricalVariogram,
+  computeEmpiricalVariogramProjected,
   evaluateNestedVariogram,
   fitVariogram,
+  fitVariogramProjected,
 } from "./variogram.js";
 export {
   kFold,
@@ -177,6 +179,7 @@ export type {
   BinomialSimulationResult,
   ComputeDirectionalEmpiricalVariogramOptions,
   ComputeEmpiricalVariogramOptions,
+  ComputeEmpiricalVariogramProjectedOptions,
   ConditionalSimulateBinomialOptions,
   ConditionalSimulateBinomialProjectedOptions,
   ConditionalSimulateManyBinomialOptions,
@@ -205,6 +208,7 @@ export type {
   FitSpherical3DOptions,
   FitSpherical3DTwoStageOptions,
   FitVariogramOptions,
+  FitVariogramProjectedOptions,
   FittedSpherical1D,
   FittedSpherical3D,
   FittedVariogram,

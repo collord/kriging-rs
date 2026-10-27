@@ -244,6 +244,23 @@ export type RawModule = {
     nBins: number,
     estimator?: string
   ) => unknown;
+  fitVariogramProjected: (
+    xs: Float64Array,
+    ys: Float64Array,
+    values: Float64Array,
+    maxDistance: number | undefined,
+    nBins: number,
+    variogramType: number,
+    estimator?: string
+  ) => unknown;
+  computeEmpiricalVariogramProjected: (
+    xs: Float64Array,
+    ys: Float64Array,
+    values: Float64Array,
+    maxDistance: number | undefined,
+    nBins: number,
+    estimator?: string
+  ) => unknown;
   computeDirectionalEmpiricalVariogram: (
     xs: Float64Array,
     ys: Float64Array,

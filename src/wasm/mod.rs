@@ -34,7 +34,7 @@ use crate::kriging::universal::{UniversalKrigingModel, UniversalTrend};
 use crate::projected::{
     Anisotropy2D, BinomialProjectedKrigingModel, DirectionalConfig, ProjectedBinomialObservation,
     ProjectedCoord, ProjectedDataset, ProjectedKrigingModel,
-    compute_directional_empirical_variogram,
+    compute_directional_empirical_variogram, compute_empirical_variogram_projected,
 };
 use crate::simulation::{
     BinomialSimulationManyResult, BinomialSimulationResult, SimulationOptions,
@@ -879,17 +879,13 @@ fn parse_estimator(s: Option<&str>) -> Result<EmpiricalEstimator, JsValue> {
     }
 }
 
-#[wasm_bindgen(js_name = fitVariogram)]
-pub fn wasm_fit_ordinary_variogram(
-    sample_lats: &[f64],
-    sample_lons: &[f64],
-    values: &[f64],
+/// Validate the `(maxDistance, nBins, estimator)` triple shared by every isotropic empirical
+/// variogram entry point.
+fn parse_variogram_config(
     max_distance: Option<f64>,
     n_bins: usize,
-    variogram_type: WasmVariogramType,
     estimator: Option<String>,
-) -> Result<JsValue, JsValue> {
-    let sample_coords = to_coords(sample_lats, sample_lons)?;
+) -> Result<VariogramConfig, JsValue> {
     let n_bins = NonZeroUsize::new(n_bins)
         .ok_or_else(|| coded_err("n_bins must be at least 1", "invalid_bins"))?;
     let max_distance = match max_distance {
@@ -910,11 +906,16 @@ pub fn wasm_fit_ordinary_variogram(
         n_bins,
         estimator,
     };
-    let values_real = values.iter().map(|v| *v as Real).collect::<Vec<_>>();
-    let dataset = GeoDataset::new(sample_coords, values_real).map_err(kriging_err_to_js)?;
-    let empirical = compute_empirical_variogram(&dataset, &config).map_err(kriging_err_to_js)?;
+    Ok(config)
+}
+
+/// Fit `variogram_type` to an empirical variogram and serialize the fitted parameters.
+fn fit_empirical_to_js(
+    empirical: &crate::variogram::empirical::EmpiricalVariogram,
+    variogram_type: WasmVariogramType,
+) -> Result<JsValue, JsValue> {
     let crate_type = VariogramType::from(variogram_type);
-    let fit = fit_variogram(&empirical, crate_type).map_err(kriging_err_to_js)?;
+    let fit = fit_variogram(empirical, crate_type).map_err(kriging_err_to_js)?;
     let (nugget, sill, range) = fit.model.params();
     serde_wasm_bindgen::to_value(&JsFittedVariogram {
         variogram_type: variogram_type_name(crate_type).to_string(),
@@ -926,6 +927,24 @@ pub fn wasm_fit_ordinary_variogram(
         residuals: fit.residuals as f64,
     })
     .map_err(err_to_js)
+}
+
+#[wasm_bindgen(js_name = fitVariogram)]
+pub fn wasm_fit_ordinary_variogram(
+    sample_lats: &[f64],
+    sample_lons: &[f64],
+    values: &[f64],
+    max_distance: Option<f64>,
+    n_bins: usize,
+    variogram_type: WasmVariogramType,
+    estimator: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let sample_coords = to_coords(sample_lats, sample_lons)?;
+    let config = parse_variogram_config(max_distance, n_bins, estimator)?;
+    let values_real = values.iter().map(|v| *v as Real).collect::<Vec<_>>();
+    let dataset = GeoDataset::new(sample_coords, values_real).map_err(kriging_err_to_js)?;
+    let empirical = compute_empirical_variogram(&dataset, &config).map_err(kriging_err_to_js)?;
+    fit_empirical_to_js(&empirical, variogram_type)
 }
 
 #[cfg(feature = "gpu")]
@@ -976,30 +995,63 @@ pub fn wasm_compute_empirical_variogram(
     estimator: Option<String>,
 ) -> Result<JsValue, JsValue> {
     let coords = to_coords(lats, lons)?;
-    let n_bins = NonZeroUsize::new(n_bins)
-        .ok_or_else(|| coded_err("n_bins must be at least 1", "invalid_bins"))?;
-    let max_distance = match max_distance {
-        Some(v) if v > 0.0 && v.is_finite() => {
-            Some(PositiveReal::try_new(v as Real).map_err(kriging_err_to_js)?)
-        }
-        Some(_) => {
-            return Err(coded_err(
-                "max_distance must be finite and positive",
-                "invalid_input",
-            ));
-        }
-        None => None,
-    };
-    let estimator = parse_estimator(estimator.as_deref())?;
-    let config = VariogramConfig {
-        max_distance,
-        n_bins,
-        estimator,
-    };
+    let config = parse_variogram_config(max_distance, n_bins, estimator)?;
     let values_real = values.iter().map(|v| *v as Real).collect::<Vec<_>>();
     let dataset = GeoDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
     let empirical = compute_empirical_variogram(&dataset, &config).map_err(kriging_err_to_js)?;
     empirical_to_js(&empirical)
+}
+
+/// Planar `(x, y)` counterpart of [`wasm_compute_empirical_variogram`]: Euclidean
+/// distances in the coordinates' units, otherwise the same bins and estimators.
+#[wasm_bindgen(js_name = computeEmpiricalVariogramProjected)]
+pub fn wasm_compute_empirical_variogram_projected(
+    xs: &[f64],
+    ys: &[f64],
+    values: &[f64],
+    max_distance: Option<f64>,
+    n_bins: usize,
+    estimator: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let empirical = projected_empirical(xs, ys, values, max_distance, n_bins, estimator)?;
+    empirical_to_js(&empirical)
+}
+
+/// Planar `(x, y)` counterpart of [`wasm_fit_ordinary_variogram`]: the fitted `range` is in
+/// the coordinates' units, ready for `ProjectedKriging`.
+#[wasm_bindgen(js_name = fitVariogramProjected)]
+pub fn wasm_fit_variogram_projected(
+    xs: &[f64],
+    ys: &[f64],
+    values: &[f64],
+    max_distance: Option<f64>,
+    n_bins: usize,
+    variogram_type: WasmVariogramType,
+    estimator: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let empirical = projected_empirical(xs, ys, values, max_distance, n_bins, estimator)?;
+    fit_empirical_to_js(&empirical, variogram_type)
+}
+
+fn projected_empirical(
+    xs: &[f64],
+    ys: &[f64],
+    values: &[f64],
+    max_distance: Option<f64>,
+    n_bins: usize,
+    estimator: Option<String>,
+) -> Result<crate::variogram::empirical::EmpiricalVariogram, JsValue> {
+    if xs.len() != values.len() {
+        return Err(coded_err(
+            "xs, ys and values must have the same length",
+            "mismatched_arrays",
+        ));
+    }
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
+    let config = parse_variogram_config(max_distance, n_bins, estimator)?;
+    let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
+    let dataset = ProjectedDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
+    compute_empirical_variogram_projected(&dataset, &config).map_err(kriging_err_to_js)
 }
 
 // ---------------------------------------------------------------------------

@@ -24,6 +24,8 @@ import {
   interpolateBinomialToGrid,
   computeEmpiricalVariogram,
   computeDirectionalEmpiricalVariogram,
+  computeEmpiricalVariogramProjected,
+  fitVariogramProjected,
   leaveOneOut,
   kFold,
   leaveOneOutSimple,
@@ -4407,6 +4409,99 @@ describe("Large projected coordinates (f32 precision)", () => {
     });
     for (let i = 0; i < a.length; i++) {
       expect(Math.abs(a[i] - b[i])).toBeLessThan(1e-5);
+    }
+  });
+});
+
+describe("Planar variography (fitVariogramProjected / computeEmpiricalVariogramProjected)", () => {
+  // A smooth field on a 0–10 km square, sampled at 80 scattered points (coordinates in km).
+  const n = 80;
+  const xsKm = Array.from({ length: n }, (_, i) => ((i * 37) % 97) / 9.7);
+  const ysKm = Array.from({ length: n }, (_, i) => ((i * 61) % 89) / 8.9);
+  const values = xsKm.map(
+    (x, i) => 5 + 2 * Math.sin(x / 2.1) + 1.5 * Math.cos(ysKm[i] / 1.7)
+  );
+
+  test("omnidirectional planar variogram equals the directional one at 90° tolerance", () => {
+    const omni = computeEmpiricalVariogramProjected({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      maxDistance: 6,
+      nBins: 10,
+    });
+    const dir = computeDirectionalEmpiricalVariogram({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      maxDistance: 6,
+      nBins: 10,
+      azimuthDeg: 0,
+      toleranceDeg: 90,
+    });
+    expect(Array.from(omni.counts)).toEqual(Array.from(dir.counts));
+    for (let i = 0; i < omni.semivariances.length; i++) {
+      expect(omni.semivariances[i]).toBeCloseTo(dir.semivariances[i], 5);
+    }
+  });
+
+  test("fitted range is in coordinate units (km vs m differ by exactly 1000x)", () => {
+    for (const variogramType of [
+      "spherical",
+      "exponential",
+      "gaussian",
+    ] as const) {
+      const km = fitVariogramProjected({
+        xs: xsKm,
+        ys: ysKm,
+        values,
+        variogramType,
+      });
+      const m = fitVariogramProjected({
+        xs: xsKm.map((x) => x * 1000),
+        ys: ysKm.map((y) => y * 1000),
+        values,
+        variogramType,
+      });
+      expect(m.variogramType).toBe(variogramType);
+      expect(m.range / km.range).toBeCloseTo(1000, 0);
+      expect(m.sill).toBeCloseTo(km.sill, 3);
+      expect(m.nugget).toBeCloseTo(km.nugget, 3);
+      expect(km.range).toBeGreaterThan(0);
+      expect(km.range).toBeLessThan(50);
+    }
+  });
+
+  test("fitted model plugs straight into ProjectedKriging", () => {
+    const fitted = fitVariogramProjected({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      variogramType: "exponential",
+    });
+    using model = new ProjectedKriging({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      variogram: fitted,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    const p = model.predict(xsKm[3], ysKm[3]);
+    expect(p.value).toBeCloseTo(values[3], 1);
+  });
+
+  test("mismatched arrays raise a coded KrigingError", () => {
+    try {
+      computeEmpiricalVariogramProjected({
+        xs: [0, 1, 2],
+        ys: [0, 1],
+        values: [1, 2, 3],
+      });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(KrigingError);
+      expect((e as KrigingError).code).toBe("mismatched_arrays");
     }
   });
 });

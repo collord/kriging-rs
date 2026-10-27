@@ -251,6 +251,24 @@ pub fn compute_directional_empirical_variogram(
     })
 }
 
+/// Omnidirectional empirical variogram on projected coordinates (Euclidean distance, in the
+/// coordinates' units). The planar counterpart of
+/// [`compute_empirical_variogram`](crate::compute_empirical_variogram): same binning, same
+/// `max_distance` default (the largest pair separation), same classical / Cressie–Hawkins
+/// estimators. Feed the result to [`fit_variogram`](crate::fit_variogram) to fit a model
+/// whose range is in the coordinates' units.
+pub fn compute_empirical_variogram_projected(
+    dataset: &ProjectedDataset,
+    config: &crate::variogram::empirical::VariogramConfig,
+) -> Result<EmpiricalVariogram, KrigingError> {
+    let coords = &dataset.coords;
+    crate::variogram::empirical::empirical_variogram_with_distance(
+        &dataset.values,
+        config,
+        |i, j| euclidean_distance(coords[i], coords[j]),
+    )
+}
+
 /// Dataset of projected coordinates and paired values. Construction validates lengths.
 #[derive(Debug, Clone)]
 pub struct ProjectedDataset {
@@ -745,6 +763,54 @@ impl BinomialProjectedKrigingModel {
 mod tests {
     use super::*;
     use crate::variogram::models::VariogramType;
+
+    fn planar_samples() -> ProjectedDataset {
+        let coords: Vec<ProjectedCoord> = (0..40)
+            .map(|i| {
+                let i = i as Real;
+                ProjectedCoord::new((i * 37.0) % 230.0 + i * 0.5, (i * 53.0) % 170.0)
+            })
+            .collect();
+        let values = coords
+            .iter()
+            .map(|c| (c.x / 60.0).sin() + (c.y / 45.0).cos())
+            .collect();
+        ProjectedDataset::new(coords, values).unwrap()
+    }
+
+    #[test]
+    fn omnidirectional_projected_variogram_matches_directional_at_90_degrees() {
+        use crate::variogram::empirical::VariogramConfig;
+        let ds = planar_samples();
+        let n_bins = NonZeroUsize::new(8).unwrap();
+        let max_distance = PositiveReal::try_new(150.0).unwrap();
+        let omni = compute_empirical_variogram_projected(
+            &ds,
+            &VariogramConfig {
+                max_distance: Some(max_distance),
+                n_bins,
+                ..VariogramConfig::default()
+            },
+        )
+        .unwrap();
+        let directional = compute_directional_empirical_variogram(
+            &ds.coords,
+            &ds.values,
+            max_distance,
+            n_bins,
+            DirectionalConfig::new(0.0, 90.0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(omni.n_pairs, directional.n_pairs);
+        for (a, b) in omni.semivariances.iter().zip(&directional.semivariances) {
+            assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+        }
+
+        // With no distance cap every pair lands in exactly one bin.
+        let all = compute_empirical_variogram_projected(&ds, &VariogramConfig::default()).unwrap();
+        let n = ds.coords.len();
+        assert_eq!(all.n_pairs.iter().sum::<usize>(), n * (n - 1) / 2);
+    }
 
     #[test]
     fn euclidean_distance_matches_pythagoras() {

@@ -172,7 +172,8 @@ pub use planar_dataset_3d::PlanarDataset3D;
 pub use projected::{
     Anisotropy2D, BinomialProjectedKrigingModel, DirectionalConfig, ProjectedBinomialFit,
     ProjectedBinomialObservation, ProjectedCoord, ProjectedDataset, ProjectedKrigingModel,
-    compute_directional_empirical_variogram, euclidean_distance, euclidean_distance_squared,
+    compute_directional_empirical_variogram, compute_empirical_variogram_projected,
+    euclidean_distance, euclidean_distance_squared,
 };
 pub use simulation_3d::{
     Grid3D, NormalScoreTransform, SgsConfig, SgsError, SgsModel3D, SgsOutputSpace,
