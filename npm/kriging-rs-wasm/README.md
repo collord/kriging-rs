@@ -1,6 +1,8 @@
 # kriging-rs-wasm
 
-TypeScript-first WebAssembly package for [kriging-rs](https://github.com/m-murphy/kriging-rs): ordinary / simple / universal / binomial kriging (both 2-D spatial and 2+1-D spatio-temporal) with optional WebGPU acceleration.
+TypeScript-first WebAssembly package for [kriging-rs](https://github.com/m-murphy/kriging-rs): ordinary / simple / universal / binomial kriging on geographic (lat/lon) or projected (x/y) coordinates, 2+1-D spatio-temporal kriging, 3-D kriging and simulation, and cokriging, with optional WebGPU acceleration.
+
+**Building an app?** [`examples/web-2d`](../../examples/web-2d) is a small typed Vite starter (variogram fit, kriging in a Web Worker, north-up map) to copy from.
 
 ## Quick start
 
@@ -23,7 +25,18 @@ const pred = model.predict(37.705, -122.435);
 
 ## Requirements
 
-- Browser or Node.js; ES2022. For custom WASM loading you can pass pre-fetched bytes to `init(wasmArrayBuffer)`.
+- Browser, Web Worker, or Node.js 18+; ES2022 runtime.
+- **TypeScript:** the `.d.ts` files declare `[Symbol.dispose]`, so add `"ESNext.Disposable"` to `compilerOptions.lib` (e.g. `["ES2022", "ESNext.Disposable", "DOM"]`).
+- **Loading the binary:** in a browser or worker, `await init()` fetches `kriging_rs_bg.wasm` next to the package's JS; Vite and similar bundlers emit it as an asset. Node has no `fetch` for `file:` URLs, so pass the bytes. The package exports the binary as `kriging-rs-wasm/wasm`:
+
+  ```ts
+  import { readFile } from "node:fs/promises";
+  import { fileURLToPath } from "node:url";
+  await init(await readFile(fileURLToPath(import.meta.resolve("kriging-rs-wasm/wasm"))));
+  ```
+
+  Calling `init()` without bytes under Node throws a `KrigingError` (code `not_loaded`) that says this.
+- **Precision:** the default build computes in `f32`. Planar and 3-D coordinates are centred in `f64` before narrowing, so raw UTM or mine-grid coordinates are fine.
 
 ## API overview
 
@@ -33,10 +46,11 @@ const pred = model.predict(37.705, -122.435);
 | `OrdinaryKriging` | Spatial interpolation of **continuous** values (e.g. temperature, elevation). Supports search neighborhoods via `setNeighborhood` / `neighborhood`. |
 | `SimpleKriging` | Ordinary kriging's fixed-mean analogue; requires a known `mean`. |
 | `UniversalKriging` | Kriging with a polynomial drift basis (`"constant"` / `"linear"` / `"quadratic"` in lat/lon). |
-| `ProjectedKriging` | Planar kriging on `(x, y)` coordinates with 2D anisotropy (`majorAngleDeg`, `rangeRatio`). |
+| `ProjectedKriging` | Planar kriging on `(x, y)` coordinates (any linear unit) with optional 2-D anisotropy, search `neighborhood`, `predictGrid`, and `fromFitted`. See [Planar (projected) workflow](#planar-projected-workflow). |
 | `BinomialKriging` | **Prevalence/proportion** surfaces from count data (successes out of trials). Also `fromPrecomputedLogits` to bypass empirical-Bayes shrinkage. |
 | `fitVariogram` | Fit a variogram model to sample data; optional `estimator: "classical" \| "cressie-hawkins"`. Use the result to build an `OrdinaryKriging` model. |
 | `computeEmpiricalVariogram` | Compute the (isotropic) empirical variogram cloud directly, without fitting a parametric model. |
+| `fitVariogramProjected` / `computeEmpiricalVariogramProjected` | Planar counterparts of `fitVariogram` / `computeEmpiricalVariogram`: Euclidean distances, `range` in coordinate units. |
 | `computeDirectionalEmpiricalVariogram` | Directional empirical variogram on planar `(x, y)` data for diagnosing anisotropy. |
 | `leaveOneOut` / `kFold` | Cross-validation on ordinary kriging. |
 | `leaveOneOutSimple` / `kFoldSimple` | Cross-validation on simple kriging (known, constant mean). |
@@ -70,6 +84,11 @@ const pred = model.predict(37.705, -122.435);
 | `conditionalSimulateSpaceTimeSimple` | ST SGS with simple kriging (known `mean`). |
 | `conditionalSimulateSpaceTimeUniversal` | ST SGS with universal kriging (polynomial trend refit per step). |
 | `conditionalSimulateSpaceTimeBinomial` | ST SGS for count data on the logit scale; returns both logit and prevalence samples. |
+| `OrdinaryKriging3D` / `SimpleKriging3D` / `UniversalKriging3D` | 3-D kriging on `(x, y, z)` with GSLib-style anisotropy and an optional k-d tree neighborhood. See [3-D kriging](#3-d-kriging-and-simulation). |
+| `computeDirectionalVariogram3D`, `fitVariogram3DJoint` / `TwoStage` / `FixedNugget`, `fitSpherical1D` | 3-D directional experimental variograms (GSLib `gamv`) and anisotropic model fitting. `fitSpherical3D*` are deprecated aliases. |
+| `gaussianSimulation3D` | Streaming 3-D sequential Gaussian simulation on a regular grid. |
+| `cokrige`, `cosimulateMultiVariable`, `fitLmc`, `computeCrossVariogram` | Multi-variable cokriging and cosimulation over a Linear Model of Coregionalization (lat/lon). See [Cokriging](#cokriging). |
+| `cokrigeCollocated`, `collocatedCosimulate`, `collocatedSecondaryFromPaired` | Collocated cokriging and cosimulation from a dense secondary variable (lat/lon). |
 
 **When to use which:** Use **ordinary kriging** when you have continuous measurements at locations (e.g. sensor values, elevations). Use **binomial kriging** when you have counts (successes and trials) and want to estimate a proportion or prevalence surface.
 
@@ -118,7 +137,21 @@ The library loads WASM synchronously after you call `init()` (optionally with pr
 
 Call and await `init()` once before using any other API. **VariogramType** (e.g. `VariogramType.Exponential`) is only safe to use after `init()` has been awaited; accessing it before init will throw when the value is used. You can pass string names like `"exponential"` instead.
 
-Supported variogram types: `"spherical"`, `"exponential"`, `"gaussian"`, `"cubic"`, `"stable"`, `"matern"`, `"power"`, `"holeeffect"`. You can pass the model type as a string (e.g. `"exponential"`) or as `VariogramType.Exponential`. For `stable` and `matern`, pass an optional `shape` when constructing a model; `fitVariogram` returns a `shape` field when the fitted model is stable or Matérn.
+Supported variogram types: `"spherical"`, `"exponential"`, `"gaussian"`, `"cubic"`, `"stable"`, `"matern"`, `"power"`, `"holeeffect"`, `"confluenthypergeometric"`. You can pass the model type as a string (e.g. `"exponential"`) or as `VariogramType.Exponential`. For `stable`, `matern` and `confluenthypergeometric`, pass an optional `shape` (and `shape2`, the tail decay, for confluent hypergeometric) when constructing a model; `fitVariogram` returns them when the fitted model has them.
+
+**Variogram parameters.** `sill` is the **total** sill (nugget included). `nugget` is the jump just past the origin: `γ(0) = 0` exactly, `γ(0⁺) = nugget`, and `C(0) = sill`, so the kriging variance includes the nugget. Plot model curves from a small positive lag so the nugget draws as the intercept. What `range` means depends on the family:
+
+| Family | `range` is |
+|--------|-----------|
+| `spherical`, `cubic` | where `γ` reaches the sill |
+| `exponential`, `gaussian` | the practical range: `γ` reaches 95% of the partial sill |
+| `stable` | a scale: `γ = nugget + c·(1 − exp(−(h/range)^shape))`, practical range ≈ `range·3^(1/shape)` |
+| `matern` | a scale: `x = h·√(2ν)/range` |
+| `confluenthypergeometric` | a scale (`β` in Ma & Bhadra 2023) |
+| `holeeffect` | where `γ` first reaches the sill, after which it oscillates: `γ ∝ 1 − sin(πh/range)/(πh/range)` |
+| `power` | unused; `sill − nugget` is the slope and `shape` the exponent |
+
+Units follow the coordinates: kilometres (Haversine) for lat/lon APIs, the coordinates' own units for projected and 3-D APIs.
 
 ### Ordinary kriging
 
@@ -259,6 +292,8 @@ const { values, variances } = model.predictGrid({
 
 **Grid layout:** Results are 2D arrays (not flat). Row index = latitude index, column index = longitude index. First row (`j = 0`) = south, last row = north; first column (`i = 0`) = west, last column = east. So `values[j][i]` is the prediction at the cell with latitude row `j` and longitude column `i`. Internally the library uses row-major order (south to north, then west to east within each row). Ordinary kriging returns `{ values, variances }`; binomial returns `{ prevalences, logitValues, variances }`, all with shape `[yCells][xCells]`.
 
+**Drawing a grid:** canvas and `ImageData` put row 0 at the **top**, so draw grid row `yCells − 1 − r` at screen row `r` (or reverse the rows once). Skipping this renders the map upside down. `ProjectedKriging.predictGrid` uses the same south-first layout.
+
 ### Search neighborhoods (ordinary kriging)
 
 By default every prediction uses all sample stations, which scales as O(n³) per model build and O(n) per prediction. For large datasets or locally-supported variograms you can restrict each prediction to the closest stations (by count and/or radius):
@@ -309,20 +344,39 @@ const model = new UniversalKriging({
 - `"linear"` — drift basis `[1, lat, lon]`.
 - `"quadratic"` — `[1, lat, lon, lat², lat·lon, lon²]`.
 
-### Projected (planar) kriging with 2D anisotropy
+### Planar (projected) workflow
 
-For already-projected coordinates (e.g. meters in a local frame), use `ProjectedKriging`. Distances are Euclidean, and 2D anisotropy is expressed as a rotation angle plus a minor-to-major range ratio:
+For projected coordinates (UTM, a local site grid, any linear unit) use the planar APIs. Distances are Euclidean, and every range, `maxDistance` and `maxRadius` is in the coordinates' units:
 
 ```ts
-import { ProjectedKriging } from "kriging-rs-wasm";
+import init, {
+  ProjectedKriging,
+  computeEmpiricalVariogramProjected,
+  fitVariogramProjected,
+} from "kriging-rs-wasm";
+await init();
 
-const model = new ProjectedKriging({
+// 1. Experimental variogram (for plotting) and a fitted model; range comes back in metres.
+const empirical = computeEmpiricalVariogramProjected({ xs, ys, values, maxDistance: 1500, nBins: 15 });
+const fitted = fitVariogramProjected({ xs, ys, values, maxDistance: 1500, nBins: 15, variogramType: "spherical" });
+
+// 2. Krige a grid. The neighborhood skips factorizing the full n×n system, so construction
+//    is O(n) and each cell solves a small local system: use it beyond a few hundred samples.
+using model = ProjectedKriging.fromFitted({
   xs, ys, values,
-  variogram: { variogramType: "exponential", nugget: 0.01, sill: 1.0, range: 500 },
-  majorAngleDeg: 30,    // CCW from +x
-  rangeRatio: 0.5,      // minor / major range, in (0, 1]
+  fittedVariogram: fitted,
+  neighborhood: { maxNeighbors: 32 },     // and/or maxRadius (coordinate units)
 });
+const grid = model.predictGrid({ xMin, xMax, yMin, yMax, xCells: 200, yCells: 200 });
+// grid.values[j][i] (row 0 = yMin, i.e. south); also grid.valuesFlat / variancesFlat
+// (row-major Float64Array) and grid.xCenters / grid.yCenters.
 ```
+
+Anisotropy is optional: `majorAngleDeg` is the azimuth of the long axis in degrees **counter-clockwise from +x**, and `rangeRatio ∈ (0, 1]` is minor / major. To estimate them, compare `computeDirectionalEmpiricalVariogram` along a few azimuths (`toleranceDeg: 90` gives the omnidirectional variogram). Neighbors are ranked by the anisotropic distance. `setNeighborhood()` and `neighborhood()` change or inspect the search after construction. Validate with `leaveOneOutProjected` / `kFoldProjected`.
+
+### Running in a Web Worker
+
+Kriging a few-hundred-by-few-hundred grid takes hundreds of milliseconds, so run it off the UI thread. In the worker, call `await init()` once, keep the data there, and post results back as transferable typed arrays. A Vite setup needs `worker: { format: "es" }`, and for a `file:` dependency `server.fs.allow` must include the package directory. [`examples/web-2d`](../../examples/web-2d) shows the full pattern.
 
 ### Binomial kriging from pre-computed logits
 
@@ -751,6 +805,72 @@ const realizations = conditionalSimulateManySpaceTime({
 // (row k holds the k-th realization in input order).
 ```
 
+## 3-D kriging and simulation
+
+For `(x, y, z)` data (drillholes, soil borings, groundwater screens), in any linear unit. Anisotropy follows GSLib's `setrot` convention: **`ang1` is the major-axis azimuth clockwise from north** (unlike the 2-D `majorAngleDeg`, which is counter-clockwise from +x), `ang2` the dip, `ang3` the plunge, and `anis1` / `anis2` the minor/major and vertical/major range ratios.
+
+```ts
+import {
+  OrdinaryKriging3D,
+  computeDirectionalVariogram3D,
+  fitVariogram3DJoint,
+} from "kriging-rs-wasm";
+
+// Directional experimentals along major (N), minor (E) and vertical axes. Angles are GSLib:
+// azimuth clockwise from north, dip positive down.
+const axis = (azimuthDeg: number, dipDeg: number, lagDistance: number) =>
+  computeDirectionalVariogram3D({ xs, ys, zs, values, lagDistance, nLags: 12, azimuthDeg, dipDeg });
+const fit = fitVariogram3DJoint({
+  major: axis(0, 0, 25),
+  minor: axis(90, 0, 25),
+  vertical: axis(0, 90, 2),
+  variogramType: "spherical",
+});
+
+using model = new OrdinaryKriging3D({
+  xs, ys, zs, values,
+  variogram: { variogramType: fit.variogramType, nugget: fit.nugget, sill: fit.sill, range: fit.rangeMajor },
+  anisotropy: {
+    ang1: 0, ang2: 0, ang3: 0,
+    anis1: fit.rangeMinor / fit.rangeMajor,
+    anis2: fit.rangeVertical / fit.rangeMajor,
+  },
+  neighborhood: { maxNeighbors: 32 },
+});
+const { values: est, variances } = model.predictBatch(targetXs, targetYs, targetZs);
+```
+
+The fitter does not reorder axes: if `rangeMinor` or `rangeVertical` comes out larger than `rangeMajor`, the direction you passed as `major` is not the longest-range one. Re-run with the axes swapped (or rotate `ang1` by 90°) so both ratios stay ≤ 1.
+
+`Prediction3D` also reports `conditionNumber` and `usedNuggetInflation` (the solver added diagonal jitter to factorize). `SimpleKriging3D` takes a known `mean`; `UniversalKriging3D` adds a linear `[1, x, y, z]` trend. `gaussianSimulation3D` streams realizations over a `Grid3D` (`originX/Y/Z` is the centre of cell `(0, 0, 0)`; the linear index is `i + nx·j + nx·ny·k`) through an `onRealization(index, values)` callback.
+
+## Cokriging
+
+Multi-variable estimation on **lat/lon** coordinates (Haversine, km).
+
+- **Full cokriging** over a Linear Model of Coregionalization (LMC). `fitLmc` fits the sill matrices of basic structures you choose (Goulard–Voltz) and returns an admissible `coregionalization`. `cokrige` predicts one variable from all of them, `kind: { type: "ordinary" }` or `{ type: "simple", means }`, and `cosimulateMultiVariable` draws joint realizations. Data can be isotopic (`{ lats, lons, variables: [z1, z2] }`) or heterotopic (`{ perVariable: [{ lats, lons, values }, ...] }`).
+- **Collocated cokriging** when a secondary variable is known at every target (Markov Model 1): `collocatedSecondaryFromPaired(primary, secondary)` (positional arguments) estimates `{ mean, stdDev, correlation }` from paired samples, then `cokrigeCollocated` / `collocatedCosimulate` use it.
+
+```ts
+import { cokrige, fitLmc } from "kriging-rs-wasm";
+
+const lmc = fitLmc({
+  lats, lons, variables: [lead, zinc], nBins: 12,
+  // Basic structures with fixed shape and range; build model bases with a zero nugget
+  // and add an explicit nugget structure.
+  bases: [{ nugget: true }, { variogram: { variogramType: "spherical", nugget: 0, sill: 1, range: 4 } }],
+});
+const lead_hat = cokrige({
+  data: { lats, lons, variables: [lead, zinc] },
+  coregionalization: lmc.coregionalization,
+  kind: { type: "ordinary" },
+  targetVariable: 0,
+  targetLats, targetLons,
+});
+```
+
+`computeCrossVariogram` returns the empirical `p × p` (cross-)semivariance matrix per lag for checking the fit.
+
 ## Disease prevalence mapping cookbook
 
 End-to-end recipe for the package's primary use case: turning sparse
@@ -796,14 +916,17 @@ import {
   computeEmpiricalVariogram,
 } from "kriging-rs-wasm";
 
-// Empirical variogram on EB-smoothed logits is the recommended starting point;
-// fitVariogram does the smoothing internally for binomial inputs.
+// Fit on empirical-Bayes-smoothed logits, as interpolateBinomialToGrid does internally.
+const prior = { alpha: 1, beta: 1 };
+const logits = successes.map((s, i) => {
+  const p = (s + prior.alpha) / (trials[i] + prior.alpha + prior.beta);
+  return Math.log(p / (1 - p));
+});
 const fitted = fitVariogram({
   sampleLats: lats, sampleLons: lons,
-  successes, trials,
+  values: logits,
   variogramType: "exponential",
   estimator: "cressie-hawkins",
-  prior: { alpha: 1, beta: 1 },
 });
 const model = BinomialKriging.fromFittedVariogramWithPrior({
   lats, lons, successes, trials,
@@ -1003,7 +1126,7 @@ const summary = simulateBinomialSpaceTimeGridSummaryAtDate({
 
 ## Error handling
 
-Constructors (`OrdinaryKriging`, `SimpleKriging`, `UniversalKriging`, `ProjectedKriging`, `BinomialKriging`, `BinomialKriging.newWithPrior`, `BinomialKriging.fromPrecomputedLogits`, the `SpaceTime*Kriging` classes), `fitVariogram`, `fitSpaceTimeVariogram`, and the top-level helpers (`computeEmpiricalVariogram`, `computeDirectionalEmpiricalVariogram`, `computeEmpiricalSpaceTimeVariogram`, `leaveOneOut`, `kFold`, `leaveOneOutSimple`, `kFoldSimple`, `leaveOneOutUniversal`, `kFoldUniversal`, `leaveOneOutProjected`, `kFoldProjected`, `leaveOneOutBinomial`, `kFoldBinomial`, `leaveOneOutSpaceTime`, `kFoldSpaceTime`, `leaveOneOutSpaceTimeSimple`, `kFoldSpaceTimeSimple`, `leaveOneOutSpaceTimeUniversal`, `kFoldSpaceTimeUniversal`, `leaveOneOutSpaceTimeBinomial`, `kFoldSpaceTimeBinomial`, `conditionalSimulate`, `conditionalSimulateSimple`, `conditionalSimulateUniversal`, `conditionalSimulateProjected`, `conditionalSimulateBinomial`, `conditionalSimulateSpaceTime`, `conditionalSimulateSpaceTimeSimple`, `conditionalSimulateSpaceTimeUniversal`, `conditionalSimulateSpaceTimeBinomial`, `evaluateNestedVariogram`) throw on invalid inputs or model build failure (e.g. singular covariance). Errors are rethrown as `KrigingError` with the underlying cause attached as `cause`. For UI-friendly messages, use the optional **`code`** property (when present), which is one of: `not_loaded`, `model_freed`, `mismatched_arrays`, `invalid_variogram`, `invalid_bins`, `singular_covariance`, `too_few_points`, `unknown_variogram`, `unknown_family`, `unknown_trend`, `unknown_estimator`, `invalid_input`, `backend_unavailable`, `internal_error`. Not every error has a code. `backend_unavailable` specifically indicates that the WASM package was built without the export in question (e.g. without the `gpu` feature), so the API can't fulfill the call in the current build.
+Every model constructor and exported function throws on invalid inputs or model build failure (e.g. singular covariance). Errors are rethrown as `KrigingError` with the underlying cause attached as `cause`. For UI-friendly messages, use the optional **`code`** property (when present), which is one of: `not_loaded`, `model_freed`, `mismatched_arrays`, `invalid_variogram`, `invalid_bins`, `singular_covariance`, `too_few_points`, `unknown_variogram`, `unknown_family`, `unknown_trend`, `unknown_estimator`, `invalid_input`, `backend_unavailable`, `internal_error`. Not every error has a code. `backend_unavailable` specifically indicates that the WASM package was built without the export in question (e.g. without the `gpu` feature), so the API can't fulfill the call in the current build.
 
 Typical causes:
 
@@ -1041,6 +1164,6 @@ From `npm/kriging-rs-wasm`, run `npm run verify`, then `npm publish` (dry-run: `
 ## Notes
 
 - Call and await `init(...)` once before invoking model constructors or variogram-fitting APIs. You can pass pre-fetched WASM bytes: `await init(wasmArrayBuffer)`.
-- Coordinates are in degrees (latitude, longitude); distances use Haversine (great-circle).
+- Lat/lon APIs (`lats`/`lons`) take degrees and use Haversine distances in kilometres. Projected APIs (`xs`/`ys`) and 3-D APIs (`xs`/`ys`/`zs`) use Euclidean distances in the coordinates' own units.
 - For GPU-enabled exports, build with `npm run build:wasm:gpu`.
 - **Resource management:** When a model is no longer needed, call `model.free()` to release WASM-held memory. This is optional but recommended in long-lived applications. **`free()` is safe to call multiple times** (subsequent calls are no-ops), so you can call it in a `finally` block without worrying about double-free.
