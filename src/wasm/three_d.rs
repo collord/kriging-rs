@@ -727,9 +727,7 @@ fn parse_model_form(
     let vt = crate::variogram::spec::VariogramSpec::new(variogram_type, 0.0, 1.0, 1.0, None, None)
         .resolve_type()
         .ok_or_else(|| coded_err("unknown variogram_type", "unknown_variogram"))?;
-    let opt = |v: f64| -> Option<Real> {
-        if v.is_finite() { Some(v as Real) } else { None }
-    };
+    let opt = |v: f64| -> Option<Real> { if v.is_finite() { Some(v as Real) } else { None } };
     Ok(crate::variogram::fitting::ModelForm {
         variogram_type: vt,
         shape1: opt(shape1),
