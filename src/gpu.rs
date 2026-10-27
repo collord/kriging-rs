@@ -54,6 +54,10 @@ var<storage, read_write> out_covariances: array<f32>;
 var<uniform> params: Params;
 
 fn semivariance(distance: f32, variogram_type: u32, nugget: f32, sill: f32, range_in: f32, shape_in: f32) -> f32 {
+    // gamma(0) = 0: the nugget is the jump just past the origin (matches VariogramModel).
+    if distance <= 0.0 {
+        return 0.0;
+    }
     let d = max(distance, 0.0);
     let r = max(range_in, 1e-6);
     let partial = max(sill - nugget, 0.0);

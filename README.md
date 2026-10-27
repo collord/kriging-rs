@@ -260,10 +260,13 @@ keeps them parallel for review/PR simplicity.
 
 **Conventions worth knowing**:
 
-- 3-D kriging variance follows upstream's "latent field" convention:
-  `σ² = C(0) − λ·k₀ − μ` where `C(0)` is the partial sill (without
-  the nugget). Add the nugget back to recover textbook "standard"
-  kriging variance.
+- Kriging variance (2-D and 3-D) is the standard textbook
+  `σ² = C(0) − λ·k₀ − μ` with `C(0)` the total sill, nugget included.
+  `γ(0) = 0` by definition; the nugget is the jump just past the
+  origin, so it sits on the kriging-matrix diagonal and raises the
+  variance as it grows. (Releases up to 0.4 dropped the nugget from the
+  diagonal, which understated variance and made the nugget have
+  almost no effect on the estimates.)
 - The robust 3-D solver uses regular Cholesky on the n×n covariance
   block (not LU like upstream's 2-D) with nugget-inflation retry on
   factorization failure. Pivoted Cholesky was specified in v3 but

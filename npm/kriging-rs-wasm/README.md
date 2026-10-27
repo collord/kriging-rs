@@ -523,6 +523,10 @@ const { distances: h, semivariances, covariances } = evaluateNestedVariogram(
 );
 ```
 
+`γ(0)` is exactly `0`: the nugget is the jump just past the origin, so the semivariance at the
+first positive distance already includes it. When plotting a model curve, start the distance
+grid just above zero to draw the nugget as the intercept.
+
 Nested variograms are not yet accepted by the kriging constructors; this entry point is for offline evaluation and plotting.
 
 ### One-shot interpolate to grid

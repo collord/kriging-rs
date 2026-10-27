@@ -558,8 +558,17 @@ impl VariogramModel {
         }
     }
 
-    /// Semivariance at `distance`. Assumes `distance >= 0` (e.g. from haversine); clamps negative input to 0.
+    /// Semivariance at `distance`. Assumes `distance >= 0` (e.g. from haversine); negative
+    /// input is treated as 0.
+    ///
+    /// `γ(0) = 0` by definition. The nugget is the discontinuity at the origin — the limit of
+    /// `γ(h)` as `h → 0⁺` — so every `h > 0` evaluates to at least the nugget while `h = 0`
+    /// itself is zero. This makes [`covariance`](Self::covariance)`(0)` equal the full sill,
+    /// which is what puts the nugget on the kriging-matrix diagonal and in `σ² = C(0) − …`.
     pub fn semivariance(&self, distance: Real) -> Real {
+        if distance <= 0.0 {
+            return 0.0;
+        }
         let d = distance.max(0.0);
         let (nugget, sill, range) = self.params();
         let partial_sill = sill - nugget;
@@ -614,7 +623,8 @@ impl VariogramModel {
         }
     }
 
-    /// Covariance `C(h) = C(0) − γ(h)`. For bounded models `C(0) = sill`; for the unbounded
+    /// Covariance `C(h) = C(0) − γ(h)`. For bounded models `C(0) = sill` (nugget included), and
+    /// `C(h) ≤ sill − nugget` for every `h > 0`; for the unbounded
     /// [power model](VariogramModel::Power), `C(0)` is not defined, so this method returns
     /// `0` there and kriging should use the [`semivariance`](Self::semivariance) form.
     pub fn covariance(&self, distance: Real) -> Real {
@@ -634,6 +644,46 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
 
+    /// A lag just past the origin, where `γ` has already jumped to the nugget.
+    const LAG_0_PLUS: Real = 1e-6;
+
+    #[test]
+    fn semivariance_is_zero_at_origin_and_nugget_just_past_it() {
+        // Regression: γ(0) used to return the nugget, so C(0) = sill − nugget and the
+        // nugget never reached the kriging diagonal (variance *fell* as nugget rose).
+        let (nugget, sill) = (0.3, 1.0);
+        let models = [
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Spherical).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Exponential).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Gaussian).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Cubic).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Stable).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::Matern).unwrap(),
+            VariogramModel::new(nugget, sill, 10.0, VariogramType::HoleEffect).unwrap(),
+            VariogramModel::new_with_shapes(
+                nugget,
+                sill,
+                10.0,
+                VariogramType::ConfluentHypergeometric,
+                0.5,
+                Some(1.0),
+            )
+            .unwrap(),
+        ];
+        for m in models {
+            let t = m.variogram_type();
+            assert_eq!(m.semivariance(0.0), 0.0, "{t:?}: γ(0) must be 0");
+            assert_relative_eq!(m.covariance(0.0), sill, epsilon = 1e-6);
+            assert_relative_eq!(m.semivariance(LAG_0_PLUS), nugget, epsilon = 1e-5);
+            assert!(
+                m.covariance(LAG_0_PLUS) <= sill - nugget + 1e-5,
+                "{t:?}: C(0⁺) must not exceed the partial sill"
+            );
+        }
+        let power = VariogramModel::new_power(0.1, 0.5, 1.0).unwrap();
+        assert_eq!(power.semivariance(0.0), 0.0);
+    }
+
     #[test]
     fn spherical_hits_sill_at_range() {
         let model = VariogramModel::new(0.1, 1.0, 10.0, VariogramType::Spherical).unwrap();
@@ -645,8 +695,8 @@ mod tests {
     fn exponential_and_gaussian_start_at_nugget() {
         let exp = VariogramModel::new(0.2, 1.2, 15.0, VariogramType::Exponential).unwrap();
         let gauss = VariogramModel::new(0.2, 1.2, 15.0, VariogramType::Gaussian).unwrap();
-        assert_relative_eq!(exp.semivariance(0.0), 0.2, epsilon = 1e-6);
-        assert_relative_eq!(gauss.semivariance(0.0), 0.2, epsilon = 1e-6);
+        assert_relative_eq!(exp.semivariance(LAG_0_PLUS), 0.2, epsilon = 1e-6);
+        assert_relative_eq!(gauss.semivariance(LAG_0_PLUS), 0.2, epsilon = 1e-6);
     }
 
     #[test]
@@ -700,9 +750,9 @@ mod tests {
         let cubic = VariogramModel::new(0.2, 1.2, 15.0, VariogramType::Cubic).unwrap();
         let stable = VariogramModel::new(0.2, 1.2, 15.0, VariogramType::Stable).unwrap();
         let matern = VariogramModel::new(0.2, 1.2, 15.0, VariogramType::Matern).unwrap();
-        assert_relative_eq!(cubic.semivariance(0.0), 0.2, epsilon = 1e-6);
-        assert_relative_eq!(stable.semivariance(0.0), 0.2, epsilon = 1e-6);
-        assert_relative_eq!(matern.semivariance(0.0), 0.2, epsilon = 1e-6);
+        assert_relative_eq!(cubic.semivariance(LAG_0_PLUS), 0.2, epsilon = 1e-6);
+        assert_relative_eq!(stable.semivariance(LAG_0_PLUS), 0.2, epsilon = 1e-6);
+        assert_relative_eq!(matern.semivariance(LAG_0_PLUS), 0.2, epsilon = 1e-6);
     }
 
     #[test]
@@ -710,7 +760,7 @@ mod tests {
         let stable =
             VariogramModel::new_with_shape(0.1, 2.0, 10.0, VariogramType::Stable, 1.0).unwrap();
         let (nugget, sill, _) = stable.params();
-        assert_relative_eq!(stable.semivariance(0.0), nugget, epsilon = 1e-6);
+        assert_relative_eq!(stable.semivariance(LAG_0_PLUS), nugget, epsilon = 1e-6);
         let mut prev = nugget;
         for d in [1.0, 3.0, 5.0, 10.0, 20.0] {
             let g = stable.semivariance(d);
@@ -746,7 +796,7 @@ mod tests {
         let g10 = m.semivariance(10.0);
         let g100 = m.semivariance(100.0);
         assert!(g1 < g10 && g10 < g100);
-        assert_relative_eq!(m.semivariance(0.0), 0.1, epsilon = 1e-6);
+        assert_relative_eq!(m.semivariance(LAG_0_PLUS), 0.1, epsilon = 1e-6);
     }
 
     #[test]
@@ -759,7 +809,7 @@ mod tests {
     #[test]
     fn hole_effect_starts_at_nugget_and_oscillates_below_sill() {
         let m = VariogramModel::new(0.1, 2.0, 10.0, VariogramType::HoleEffect).unwrap();
-        assert_relative_eq!(m.semivariance(0.0), 0.1, epsilon = 1e-5);
+        assert_relative_eq!(m.semivariance(LAG_0_PLUS), 0.1, epsilon = 1e-5);
         // At d = range/2 the hole-effect crosses above the midpoint.
         let mid = m.semivariance(5.0);
         assert!(mid > 0.1 && mid < 2.0);
@@ -797,7 +847,7 @@ mod tests {
             Some(1.0),
         )
         .unwrap();
-        assert_relative_eq!(m.semivariance(0.0), 0.1, epsilon = 1e-6);
+        assert_relative_eq!(m.semivariance(LAG_0_PLUS), 0.1, epsilon = 1e-6);
         let mut prev = m.semivariance(0.0);
         for d in [1.0, 3.0, 5.0, 10.0, 50.0, 500.0] {
             let g = m.semivariance(d);

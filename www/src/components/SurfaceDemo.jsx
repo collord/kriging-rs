@@ -94,7 +94,12 @@ function withShapeOverrides(fitted, options) {
 function buildFittedVariogramCurve(fitted, variogramPoints) {
   if (!fitted || !variogramPoints?.length) return null;
   const maxDistance = Math.max(...variogramPoints.map((p) => p.distance), 1e-9);
-  const distances = Array.from({ length: 121 }, (_, i) => (i / 120) * maxDistance);
+  // Start just past the origin: γ(0) = 0 exactly, and the nugget is the jump at 0⁺, so
+  // sampling h = 0 would draw a ramp from 0 up to the nugget instead of the intercept.
+  const distances = Array.from(
+    { length: 121 },
+    (_, i) => (Math.max(i, 1e-6) / 120) * maxDistance,
+  );
   try {
     const evaluated = evaluateNestedVariogram(
       [
