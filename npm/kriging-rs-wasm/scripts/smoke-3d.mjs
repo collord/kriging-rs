@@ -12,14 +12,15 @@
 // Run with: node scripts/smoke-3d.mjs
 
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgUrl = resolve(here, "..", "pkg", "kriging_rs.js");
 const wasmUrl = resolve(here, "..", "pkg", "kriging_rs_bg.wasm");
 
-const mod = await import(pkgUrl);
+// import() needs a file:// URL; a bare absolute path breaks on Windows (drive-letter paths).
+const mod = await import(pathToFileURL(pkgUrl).href);
 
 // wasm-bindgen "web" target wants explicit init with the wasm bytes.
 const wasmBytes = await readFile(wasmUrl);
@@ -40,13 +41,15 @@ const values = new Float64Array(xs.map((x, i) => 1 + 2 * x + 3 * ys[i] + 4 * zs[
 
 // Identity anisotropy (no rotation, no stretch).
 const ANG = [0, 0, 0, 1, 1];
+// Variograms cross the WASM boundary as one spec object.
+const VARIOGRAM = { variogramType: "exponential", nugget: 0.01, sill: 100.0, range: 15.0 };
 
 // ---- OK3D ----
 const ok = WasmOrdinaryKriging3D.fromArrays(
   xs, ys, zs, values,
   ...ANG,
-  "exponential", 0.01, 100.0, 15.0,
-  undefined, undefined, undefined,  // shape, max_radius, max_neighbors
+  VARIOGRAM,
+  undefined, undefined,  // max_radius, max_neighbors
 );
 const okPred = ok.predict(5.0, 5.0, 5.0);
 if (!Number.isFinite(okPred.value) || !Number.isFinite(okPred.variance)) {
@@ -71,8 +74,8 @@ console.log(`OK3D batch values: [${[...okBatch.values].map(v => v.toFixed(2)).jo
 const okAniso = WasmOrdinaryKriging3D.fromArrays(
   xs, ys, zs, values,
   0, 0, 0, 1.0, 0.1,
-  "exponential", 0.01, 100.0, 15.0,
-  undefined, undefined, undefined,
+  VARIOGRAM,
+  undefined, undefined,
 );
 // Target near a face (off the symmetry axes) so anisotropy is detectable.
 const ASYM_TARGET = [2.0, 4.0, 1.5];
@@ -93,8 +96,7 @@ const sk = WasmSimpleKriging3D.fromArrays(
   xs, ys, zs, values,
   meanValue,
   ...ANG,
-  "exponential", 0.01, 100.0, 15.0,
-  undefined,
+  VARIOGRAM,
 );
 const skPred = sk.predict(5.0, 5.0, 5.0);
 if (!Number.isFinite(skPred.value)) {
@@ -106,8 +108,7 @@ console.log(`SK3D at (5,5,5): value=${skPred.value.toFixed(3)} var=${skPred.vari
 const uk = WasmUniversalKriging3D.fromArraysLinear(
   xs, ys, zs, values,
   ...ANG,
-  "exponential", 0.01, 100.0, 15.0,
-  undefined,
+  VARIOGRAM,
 );
 const ukPred = uk.predict(5.0, 5.0, 5.0);
 const expectedTrend = 1 + 2 * 5 + 3 * 5 + 4 * 5;
@@ -124,8 +125,7 @@ const seen = [];
 gaussianSimulation3D(
   xs, ys, zs, values,
   ...ANG,
-  "exponential", 0.01, 100.0, 15.0,
-  undefined,
+  VARIOGRAM,
   NX, NY, NZ,
   0.0, 0.0, 0.0,      // origin
   2.5, 2.5, 5.0,      // spacing

@@ -50,7 +50,7 @@
     "build:ts": "tsc -p tsconfig.build.json",
     "build": "npm run build:wasm && npm run build:ts",
     "typecheck:contracts": "npm run build:wasm && tsc -p tsconfig.contracts.json --noEmit",
-    "smoke": "node scripts/smoke.mjs",
+    "smoke": "node scripts/smoke.mjs && node scripts/smoke-3d.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src tests --max-warnings 0",
