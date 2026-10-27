@@ -12,6 +12,11 @@ streaming realization API. The 2-D path is unchanged. See the
 
 [Documentation](https://docs.rs/kriging-rs)
 
+**In the browser:** the [`kriging-rs-wasm`](npm/kriging-rs-wasm) npm package exposes this
+crate to TypeScript. [`examples/web-2d`](examples/web-2d) is a typed starter app (variogram
+fit, kriging in a Web Worker, north-up map) to build from. Contributors and coding agents:
+start with [AGENTS.md](AGENTS.md).
+
 ## 3-D quick example
 
 ```rust
