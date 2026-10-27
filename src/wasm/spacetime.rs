@@ -29,10 +29,11 @@ use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal};
 use crate::variogram::models::{VariogramModel, VariogramType};
 
 use super::{
-    JsBinomialPrediction, JsPrediction, binomial_cv_result_to_js, binomial_many_simulation_to_js,
-    binomial_simulation_to_js, coded_err, cv_result_to_js, err_to_js, kriging_err_to_js,
-    map_binomial_predictions, map_predictions, parse_binomial_prior, parse_simulation_options,
-    set_object_field, spec_to_model, split_binomial_predictions, split_predictions,
+    JsBinomialPrediction, JsPrediction, PlanarOrigin, binomial_cv_result_to_js,
+    binomial_many_simulation_to_js, binomial_simulation_to_js, coded_err, cv_result_to_js,
+    err_to_js, kriging_err_to_js, map_binomial_predictions, map_predictions, parse_binomial_prior,
+    parse_simulation_options, set_object_field, spec_to_model, split_binomial_predictions,
+    split_predictions,
 };
 
 const FAMILY_HELP: &str = "family must be 'separable' or 'productSum'";
@@ -168,6 +169,7 @@ fn build_geo_targets(
 }
 
 fn build_projected_dataset(
+    origin: PlanarOrigin,
     xs: &[f64],
     ys: &[f64],
     times: &[f64],
@@ -181,7 +183,7 @@ fn build_projected_dataset(
     }
     let mut coords = Vec::with_capacity(xs.len());
     for i in 0..xs.len() {
-        let proj = ProjectedCoord::new(xs[i] as Real, ys[i] as Real);
+        let proj = origin.coord(xs[i], ys[i]);
         coords.push(SpaceTimeCoord::try_new(proj, times[i] as Real).map_err(kriging_err_to_js)?);
     }
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
@@ -189,6 +191,7 @@ fn build_projected_dataset(
 }
 
 fn build_projected_targets(
+    origin: PlanarOrigin,
     xs: &[f64],
     ys: &[f64],
     times: &[f64],
@@ -201,7 +204,7 @@ fn build_projected_targets(
     }
     let mut out = Vec::with_capacity(xs.len());
     for i in 0..xs.len() {
-        let proj = ProjectedCoord::new(xs[i] as Real, ys[i] as Real);
+        let proj = origin.coord(xs[i], ys[i]);
         out.push(SpaceTimeCoord::try_new(proj, times[i] as Real).map_err(kriging_err_to_js)?);
     }
     Ok(out)
@@ -572,6 +575,7 @@ impl WasmSpaceTimeBinomialKriging {
 #[wasm_bindgen]
 pub struct WasmSpaceTimeOrdinaryProjectedKriging {
     inner: SpaceTimeOrdinaryKrigingModel<ProjectedMetric>,
+    origin: PlanarOrigin,
 }
 
 #[wasm_bindgen]
@@ -586,18 +590,18 @@ impl WasmSpaceTimeOrdinaryProjectedKriging {
         range_ratio: f64,
         variogram: JsValue,
     ) -> Result<WasmSpaceTimeOrdinaryProjectedKriging, JsValue> {
-        let dataset = build_projected_dataset(xs, ys, times, values)?;
+        let origin = PlanarOrigin::centroid(xs, ys);
+        let dataset = build_projected_dataset(origin, xs, ys, times, values)?;
         let variogram = spacetime_variogram_from_js(variogram)?;
         let metric = projected_metric(major_angle_deg, range_ratio)?;
         let inner = SpaceTimeOrdinaryKrigingModel::new(metric, dataset, variogram)
             .map_err(kriging_err_to_js)?;
-        Ok(Self { inner })
+        Ok(Self { inner, origin })
     }
 
     pub fn predict(&self, x: f64, y: f64, time: f64) -> Result<JsValue, JsValue> {
-        let target =
-            SpaceTimeCoord::try_new(ProjectedCoord::new(x as Real, y as Real), time as Real)
-                .map_err(kriging_err_to_js)?;
+        let target = SpaceTimeCoord::try_new(self.origin.coord(x, y), time as Real)
+            .map_err(kriging_err_to_js)?;
         let pred = self.inner.predict(target).map_err(kriging_err_to_js)?;
         serde_wasm_bindgen::to_value(&JsPrediction {
             value: pred.value as f64,
@@ -613,7 +617,7 @@ impl WasmSpaceTimeOrdinaryProjectedKriging {
         ys: &[f64],
         times: &[f64],
     ) -> Result<JsValue, JsValue> {
-        let targets = build_projected_targets(xs, ys, times)?;
+        let targets = build_projected_targets(self.origin, xs, ys, times)?;
         let out = self
             .inner
             .predict_batch(&targets)

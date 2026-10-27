@@ -157,6 +157,56 @@ pub(super) fn to_coords(lats: &[f64], lons: &[f64]) -> Result<Vec<GeoCoord>, JsV
     Ok(out)
 }
 
+/// Origin shift for planar `(x, y)` input, applied in `f64` before narrowing to [`Real`].
+///
+/// Kriging, variograms, cross-validation and simulation depend only on coordinate
+/// differences (and polynomial trends span the same space after a shift), so moving the
+/// origin to the data centroid changes no result. It does keep the default `f32` build
+/// accurate for large projected coordinates: a raw UTM northing near 4.1e6 m resolves only
+/// to ~0.5 m in `f32`, while the same data centred resolves to well under a millimetre.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct PlanarOrigin {
+    x: f64,
+    y: f64,
+}
+
+impl PlanarOrigin {
+    /// Centroid of the finite points (the origin when there are none), so a stray `NaN`
+    /// stays confined to its own point instead of shifting every coordinate.
+    pub(super) fn centroid(xs: &[f64], ys: &[f64]) -> Self {
+        let (mut sx, mut sy, mut n) = (0.0, 0.0, 0usize);
+        for (&x, &y) in xs.iter().zip(ys) {
+            if x.is_finite() && y.is_finite() {
+                sx += x;
+                sy += y;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return Self::default();
+        }
+        Self {
+            x: sx / n as f64,
+            y: sy / n as f64,
+        }
+    }
+
+    pub(super) fn coord(self, x: f64, y: f64) -> ProjectedCoord {
+        ProjectedCoord::new((x - self.x) as Real, (y - self.y) as Real)
+    }
+
+    /// Shift and narrow paired coordinate arrays; errors if their lengths differ.
+    pub(super) fn coords(self, xs: &[f64], ys: &[f64]) -> Result<Vec<ProjectedCoord>, JsValue> {
+        if xs.len() != ys.len() {
+            return Err(coded_err(
+                "xs and ys must have the same length",
+                "mismatched_arrays",
+            ));
+        }
+        Ok(xs.iter().zip(ys).map(|(&x, &y)| self.coord(x, y)).collect())
+    }
+}
+
 /// Map any display-able error to a coded JS error object. Defaults `code` to `invalid_input`.
 /// Prefer [`kriging_err_to_js`] for `KrigingError` so the right code is attached.
 pub(super) fn err_to_js(err: impl std::fmt::Display) -> JsValue {
@@ -974,11 +1024,7 @@ pub fn wasm_compute_directional_empirical_variogram(
             "mismatched_arrays",
         ));
     }
-    let coords: Vec<ProjectedCoord> = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
     let max_distance = PositiveReal::try_new(max_distance as Real).map_err(kriging_err_to_js)?;
     let n_bins = NonZeroUsize::new(n_bins)
@@ -1177,6 +1223,7 @@ impl WasmUniversalKriging {
 #[wasm_bindgen]
 pub struct WasmProjectedKriging {
     inner: ProjectedKrigingModel,
+    origin: PlanarOrigin,
 }
 
 #[wasm_bindgen]
@@ -1199,11 +1246,8 @@ impl WasmProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let origin = PlanarOrigin::centroid(xs, ys);
+        let coords = origin.coords(xs, ys)?;
         let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
         let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
@@ -1211,11 +1255,11 @@ impl WasmProjectedKriging {
         let dataset = ProjectedDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
         let inner =
             ProjectedKrigingModel::new(dataset, model, anisotropy).map_err(kriging_err_to_js)?;
-        Ok(Self { inner })
+        Ok(Self { inner, origin })
     }
 
     pub fn predict(&self, x: f64, y: f64) -> Result<JsValue, JsValue> {
-        let coord = ProjectedCoord::new(x as Real, y as Real);
+        let coord = self.origin.coord(x, y);
         let pred = self.inner.predict(coord).map_err(kriging_err_to_js)?;
         serde_wasm_bindgen::to_value(&JsPrediction {
             value: pred.value as f64,
@@ -1232,11 +1276,7 @@ impl WasmProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let coords = self.origin.coords(xs, ys)?;
         let out = self
             .inner
             .predict_batch(&coords)
@@ -1252,11 +1292,7 @@ impl WasmProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let coords = self.origin.coords(xs, ys)?;
         let out = self
             .inner
             .predict_batch(&coords)
@@ -1282,6 +1318,7 @@ impl WasmProjectedKriging {
 // ---------------------------------------------------------------------------
 
 fn build_projected_binomial_observations(
+    origin: PlanarOrigin,
     xs: &[f64],
     ys: &[f64],
     successes: &[u32],
@@ -1300,7 +1337,7 @@ fn build_projected_binomial_observations(
             dropped.push(i);
             continue;
         }
-        let coord = ProjectedCoord::new(xs[i] as Real, ys[i] as Real);
+        let coord = origin.coord(xs[i], ys[i]);
         out.push(
             ProjectedBinomialObservation::new(coord, successes[i], trials[i])
                 .map_err(kriging_err_to_js)?,
@@ -1313,6 +1350,7 @@ fn build_projected_binomial_observations(
 pub struct WasmBinomialProjectedKriging {
     inner: BinomialProjectedKrigingModel,
     build_notes: BinomialBuildNotes,
+    origin: PlanarOrigin,
 }
 
 #[wasm_bindgen]
@@ -1332,8 +1370,9 @@ impl WasmBinomialProjectedKriging {
         major_angle_deg: f64,
         range_ratio: f64,
     ) -> Result<WasmBinomialProjectedKriging, JsValue> {
+        let origin = PlanarOrigin::centroid(xs, ys);
         let (observations, zero_trial_drops) =
-            build_projected_binomial_observations(xs, ys, successes, trials)?;
+            build_projected_binomial_observations(origin, xs, ys, successes, trials)?;
         if observations.len() < 2 {
             return Err(coded_err(
                 "need at least two non-zero-trial sites after dropping trials==0 rows",
@@ -1351,6 +1390,7 @@ impl WasmBinomialProjectedKriging {
         Ok(Self {
             inner: fit.model,
             build_notes,
+            origin,
         })
     }
 
@@ -1367,8 +1407,9 @@ impl WasmBinomialProjectedKriging {
         prior_alpha: f64,
         prior_beta: f64,
     ) -> Result<WasmBinomialProjectedKriging, JsValue> {
+        let origin = PlanarOrigin::centroid(xs, ys);
         let (observations, zero_trial_drops) =
-            build_projected_binomial_observations(xs, ys, successes, trials)?;
+            build_projected_binomial_observations(origin, xs, ys, successes, trials)?;
         if observations.len() < 2 {
             return Err(coded_err(
                 "need at least two non-zero-trial sites after dropping trials==0 rows",
@@ -1389,6 +1430,7 @@ impl WasmBinomialProjectedKriging {
         Ok(Self {
             inner: fit.model,
             build_notes,
+            origin,
         })
     }
 
@@ -1409,11 +1451,8 @@ impl WasmBinomialProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let origin = PlanarOrigin::centroid(xs, ys);
+        let coords = origin.coords(xs, ys)?;
         let logits_real: Vec<Real> = logits.iter().map(|v| *v as Real).collect();
         let model = variogram_model_from_js(variogram)?;
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
@@ -1428,6 +1467,7 @@ impl WasmBinomialProjectedKriging {
         Ok(Self {
             inner: fit.model,
             build_notes: fit.notes,
+            origin,
         })
     }
 
@@ -1439,7 +1479,7 @@ impl WasmBinomialProjectedKriging {
     }
 
     pub fn predict(&self, x: f64, y: f64) -> Result<JsValue, JsValue> {
-        let coord = ProjectedCoord::new(x as Real, y as Real);
+        let coord = self.origin.coord(x, y);
         let pred = self.inner.predict(coord).map_err(kriging_err_to_js)?;
         serde_wasm_bindgen::to_value(&JsBinomialPrediction {
             prevalence: pred.prevalence as f64,
@@ -1458,11 +1498,7 @@ impl WasmBinomialProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let coords = self.origin.coords(xs, ys)?;
         let out = self
             .inner
             .predict_batch(&coords)
@@ -1478,11 +1514,7 @@ impl WasmBinomialProjectedKriging {
                 "mismatched_arrays",
             ));
         }
-        let coords: Vec<ProjectedCoord> = xs
-            .iter()
-            .zip(ys.iter())
-            .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-            .collect();
+        let coords = self.origin.coords(xs, ys)?;
         let out = self
             .inner
             .predict_batch(&coords)
@@ -1740,11 +1772,7 @@ pub fn wasm_leave_one_out_projected(
             "mismatched_arrays",
         ));
     }
-    let coords: Vec<ProjectedCoord> = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
@@ -1771,11 +1799,7 @@ pub fn wasm_k_fold_projected(
             "mismatched_arrays",
         ));
     }
-    let coords: Vec<ProjectedCoord> = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
     let values_real: Vec<Real> = values.iter().map(|v| *v as Real).collect();
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
@@ -1973,11 +1997,7 @@ pub fn wasm_leave_one_out_binomial_projected(
             "mismatched_arrays",
         ));
     }
-    let coords: Vec<ProjectedCoord> = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
@@ -2008,11 +2028,7 @@ pub fn wasm_k_fold_binomial_projected(
             "mismatched_arrays",
         ));
     }
-    let coords: Vec<ProjectedCoord> = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let coords = PlanarOrigin::centroid(xs, ys).coords(xs, ys)?;
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
@@ -2195,17 +2211,10 @@ pub fn wasm_conditional_simulate_projected(
             "mismatched_arrays",
         ));
     }
-    let cond_coords: Vec<ProjectedCoord> = conditioning_xs
-        .iter()
-        .zip(conditioning_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let origin = PlanarOrigin::centroid(conditioning_xs, conditioning_ys);
+    let cond_coords = origin.coords(conditioning_xs, conditioning_ys)?;
     let cond_values: Vec<Real> = conditioning_values.iter().map(|v| *v as Real).collect();
-    let targets: Vec<ProjectedCoord> = target_xs
-        .iter()
-        .zip(target_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let targets = origin.coords(target_xs, target_ys)?;
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
@@ -2449,16 +2458,9 @@ pub fn wasm_conditional_simulate_binomial_projected(
             "mismatched_arrays",
         ));
     }
-    let cond_coords: Vec<ProjectedCoord> = conditioning_xs
-        .iter()
-        .zip(conditioning_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
-    let targets: Vec<ProjectedCoord> = target_xs
-        .iter()
-        .zip(target_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let origin = PlanarOrigin::centroid(conditioning_xs, conditioning_ys);
+    let cond_coords = origin.coords(conditioning_xs, conditioning_ys)?;
+    let targets = origin.coords(target_xs, target_ys)?;
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;
@@ -2514,16 +2516,9 @@ pub fn wasm_conditional_simulate_many_binomial_projected(
             "mismatched_arrays",
         ));
     }
-    let cond_coords: Vec<ProjectedCoord> = conditioning_xs
-        .iter()
-        .zip(conditioning_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
-    let targets: Vec<ProjectedCoord> = target_xs
-        .iter()
-        .zip(target_ys.iter())
-        .map(|(&x, &y)| ProjectedCoord::new(x as Real, y as Real))
-        .collect();
+    let origin = PlanarOrigin::centroid(conditioning_xs, conditioning_ys);
+    let cond_coords = origin.coords(conditioning_xs, conditioning_ys)?;
+    let targets = origin.coords(target_xs, target_ys)?;
     let model = variogram_model_from_js(variogram)?;
     let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
         .map_err(kriging_err_to_js)?;

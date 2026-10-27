@@ -1614,7 +1614,7 @@ describe("Conditional simulation", () => {
         targetLons,
         variogram,
         nRealizations: 0,
-      }),
+      })
     ).toThrow(KrigingError);
   });
 
@@ -2489,7 +2489,12 @@ describe("Space-time kriging", () => {
       const date = new Date(12 * 3_600_000);
       const dates = [date, date];
       const opts = { timeUnit: "hours" as const };
-      const fromDates = model.predictBatchAtDates([0.5, 0.5], [0.5, 0.5], dates, opts);
+      const fromDates = model.predictBatchAtDates(
+        [0.5, 0.5],
+        [0.5, 0.5],
+        dates,
+        opts
+      );
       const fromArrays = model.predictBatchArraysAtDates(
         [0.5, 0.5],
         [0.5, 0.5],
@@ -3523,7 +3528,7 @@ describe("Polygon aggregation over ensembles", () => {
     // For polygon "right-half": realization k area-mean = k*0.1 + 0.04
     // -> mean = 0.24, var = 0.025
     expect(result[1].mean).toBeCloseTo(0.24, 6);
-    expect((result[1].variance as number)).toBeCloseTo(0.025, 6);
+    expect(result[1].variance as number).toBeCloseTo(0.025, 6);
   });
 
   test("aggregatePrevalenceByPolygon: weighted mean honors per-cell weights", () => {
@@ -3783,7 +3788,9 @@ function gridSamples3D(n: number) {
         ys.push(y);
         zs.push(z);
         values.push(
-          Math.sin(x / 5) + Math.cos(y / 5) + 0.5 * Math.sin(z / 3) +
+          Math.sin(x / 5) +
+            Math.cos(y / 5) +
+            0.5 * Math.sin(z / 3) +
             0.1 * Math.sin(7.3 * i + 11.9 * j + 17.7 * k)
         );
       }
@@ -3827,17 +3834,31 @@ describe("3-D ordinary kriging", () => {
     // is what the VariogramSpec boundary buys the 3-D surface (a bare
     // scalar API could only carry the first shape, nu).
     const lowAlpha = new OrdinaryKriging3D({
-      xs, ys, zs, values,
+      xs,
+      ys,
+      zs,
+      values,
       variogram: {
         variogramType: "confluenthypergeometric",
-        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 0.5,
+        nugget: 0.01,
+        sill: 100,
+        range: 15,
+        shape: 1.0,
+        shape2: 0.5,
       },
     });
     const highAlpha = new OrdinaryKriging3D({
-      xs, ys, zs, values,
+      xs,
+      ys,
+      zs,
+      values,
       variogram: {
         variogramType: "confluenthypergeometric",
-        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 5.0,
+        nugget: 0.01,
+        sill: 100,
+        range: 15,
+        shape: 1.0,
+        shape2: 5.0,
       },
     });
     try {
@@ -4122,7 +4143,10 @@ describe("3-D directional variogram and spherical fits", () => {
     expect(spherical.variogramType).toBe("spherical");
     expect(spherical.shape).toBeNull();
 
-    const gaussian = fitSpherical3DJoint({ ...input, variogramType: "gaussian" });
+    const gaussian = fitSpherical3DJoint({
+      ...input,
+      variogramType: "gaussian",
+    });
     expect(gaussian.variogramType).toBe("gaussian");
     expect(gaussian.rangeMajor).toBeGreaterThan(0);
 
@@ -4248,5 +4272,141 @@ describe("3-D sequential Gaussian simulation", () => {
         },
       })
     ).toThrow(boom);
+  });
+});
+
+describe("Large projected coordinates (f32 precision)", () => {
+  // UTM-scale offsets: in f32, a northing near 4.1e6 m resolves to ~0.5 m. The WASM
+  // boundary centres coordinates in f64 before narrowing, so shifting the whole dataset
+  // must not change any result.
+  const X0 = 512_345.678;
+  const Y0 = 4_123_456.789;
+  const n = 60;
+  const local = Array.from({ length: n }, (_, i) => ({
+    x: ((i * 37) % 23) * 41.3 + (i % 5) * 7.1,
+    y: ((i * 53) % 29) * 33.7 + (i % 7) * 5.3,
+  }));
+  const values = local.map(
+    ({ x, y }) => 10 + Math.sin(x / 300) * 3 + Math.cos(y / 250) * 2
+  );
+  const xsLocal = local.map((p) => p.x);
+  const ysLocal = local.map((p) => p.y);
+  const xsUtm = xsLocal.map((x) => x + X0);
+  const ysUtm = ysLocal.map((y) => y + Y0);
+  const variogram = {
+    variogramType: "exponential" as const,
+    nugget: 0.05,
+    sill: 4,
+    range: 800,
+  };
+  const targets = [
+    [12.5, 17.25],
+    [400.1, 333.3],
+    [777.7, 640.4],
+  ];
+
+  test("ProjectedKriging predictions are invariant to a UTM-scale shift", () => {
+    using a = new ProjectedKriging({
+      xs: xsLocal,
+      ys: ysLocal,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    using b = new ProjectedKriging({
+      xs: xsUtm,
+      ys: ysUtm,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    for (const [x, y] of targets) {
+      const pa = a.predict(x, y);
+      const pb = b.predict(x + X0, y + Y0);
+      expect(Math.abs(pa.value - pb.value)).toBeLessThan(1e-4);
+      expect(Math.abs(pa.variance - pb.variance)).toBeLessThan(1e-4);
+    }
+  });
+
+  test("OrdinaryKriging3D predictions are invariant to a UTM-scale shift", () => {
+    const zs = local.map((_, i) => (i % 4) * 2.5);
+    using a = new OrdinaryKriging3D({
+      xs: xsLocal,
+      ys: ysLocal,
+      zs,
+      values,
+      variogram,
+    });
+    using b = new OrdinaryKriging3D({
+      xs: xsUtm,
+      ys: ysUtm,
+      zs: zs.map((z) => z + 1_000),
+      values,
+      variogram,
+    });
+    for (const [x, y] of targets) {
+      const pa = a.predict(x, y, 3);
+      const pb = b.predict(x + X0, y + Y0, 1_003);
+      expect(Math.abs(pa.value - pb.value)).toBeLessThan(1e-4);
+      expect(Math.abs(pa.variance - pb.variance)).toBeLessThan(1e-4);
+    }
+  });
+
+  test("directional empirical variogram is invariant to a UTM-scale shift", () => {
+    const opts = {
+      values,
+      maxDistance: 1000,
+      nBins: 10,
+      azimuthDeg: 0,
+      toleranceDeg: 90,
+    };
+    const a = computeDirectionalEmpiricalVariogram({
+      xs: xsLocal,
+      ys: ysLocal,
+      ...opts,
+    });
+    const b = computeDirectionalEmpiricalVariogram({
+      xs: xsUtm,
+      ys: ysUtm,
+      ...opts,
+    });
+    expect(Array.from(b.counts)).toEqual(Array.from(a.counts));
+    for (let i = 0; i < a.distances.length; i++) {
+      expect(Math.abs(a.distances[i] - b.distances[i])).toBeLessThan(1e-3);
+      expect(Math.abs(a.semivariances[i] - b.semivariances[i])).toBeLessThan(
+        1e-4
+      );
+    }
+  });
+
+  test("conditionalSimulateProjected realizations are invariant to a UTM-scale shift", () => {
+    const tx = targets.map(([x]) => x);
+    const ty = targets.map(([, y]) => y);
+    const common = {
+      conditioningValues: values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+      seed: 7,
+    };
+    const a = conditionalSimulateProjected({
+      ...common,
+      conditioningXs: xsLocal,
+      conditioningYs: ysLocal,
+      targetXs: tx,
+      targetYs: ty,
+    });
+    const b = conditionalSimulateProjected({
+      ...common,
+      conditioningXs: xsUtm,
+      conditioningYs: ysUtm,
+      targetXs: tx.map((x) => x + X0),
+      targetYs: ty.map((y) => y + Y0),
+    });
+    for (let i = 0; i < a.length; i++) {
+      expect(Math.abs(a[i] - b[i])).toBeLessThan(1e-5);
+    }
   });
 });
