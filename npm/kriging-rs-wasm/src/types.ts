@@ -743,7 +743,10 @@ export interface BinomialKrigingWithPriorOptions {
 export interface NeighborhoodOptions {
   /** Keep only the `k` closest stations at each prediction location. */
   maxNeighbors?: number;
-  /** Keep only stations within this great-circle distance (kilometers). */
+  /**
+   * Keep only stations within this distance: great-circle kilometres for lat/lon models,
+   * coordinate units (anisotropic distance) for {@link ProjectedKriging}.
+   */
   maxRadius?: number;
 }
 
@@ -783,11 +786,69 @@ export interface ProjectedKrigingOptions {
   xs: NumericArrayInput;
   ys: NumericArrayInput;
   values: NumericArrayInput;
+  /** Variogram whose `range` is in the coordinates' units (e.g. from {@link fitVariogramProjected}). */
   variogram: VariogramParams;
-  /** Azimuth of the major axis, in degrees counter-clockwise from +x. */
-  majorAngleDeg: number;
-  /** Ratio of minor to major range, in `(0, 1]`. */
-  rangeRatio: number;
+  /** Azimuth of the major axis, in degrees counter-clockwise from +x. Default `0`. */
+  majorAngleDeg?: number;
+  /** Ratio of minor to major range, in `(0, 1]`. Default `1` (isotropic). */
+  rangeRatio?: number;
+  /**
+   * Search neighborhood (`maxRadius` in coordinate units). When set, the model never
+   * factorizes the full `n × n` system, so construction is `O(n)` and each prediction
+   * solves a small local system. Use it beyond a few hundred stations.
+   */
+  neighborhood?: NeighborhoodOptions;
+}
+
+/**
+ * Options for {@link ProjectedKriging.fromFitted}: planar data plus a fitted variogram
+ * (typically from {@link fitVariogramProjected}).
+ */
+export interface ProjectedKrigingFromFittedOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  values: NumericArrayInput;
+  fittedVariogram: FittedVariogram;
+  /** If set, overrides the fitted nugget. */
+  nuggetOverride?: number;
+  /** Azimuth of the major axis, in degrees counter-clockwise from +x. Default `0`. */
+  majorAngleDeg?: number;
+  /** Ratio of minor to major range, in `(0, 1]`. Default `1` (isotropic). */
+  rangeRatio?: number;
+  /** Search neighborhood; see {@link ProjectedKrigingOptions.neighborhood}. */
+  neighborhood?: NeighborhoodOptions;
+}
+
+/**
+ * A regular planar grid for {@link ProjectedKriging.predictGrid}: `xCells × yCells` cells
+ * covering `[xMin, xMax] × [yMin, yMax]`, predicted at cell centres.
+ */
+export interface PredictGridProjectedOptions {
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  /** Number of columns (x direction). */
+  xCells: number;
+  /** Number of rows (y direction). */
+  yCells: number;
+}
+
+/**
+ * Output of {@link ProjectedKriging.predictGrid}. Row `j = 0` is the **southern** row
+ * (`yMin`) and column `i = 0` the western one (`xMin`), the same convention as
+ * {@link OrdinaryKriging.predictGrid}. To draw north-up (canvas row 0 at the top), read
+ * row `yCells - 1 - r` for screen row `r`.
+ */
+export interface ProjectedGridOutput extends OrdinaryGridOutput {
+  /** `values` as one row-major array: `valuesFlat[j * xCells + i]`. */
+  valuesFlat: Float64Array;
+  /** `variances` as one row-major array, same layout as `valuesFlat`. */
+  variancesFlat: Float64Array;
+  /** Cell-centre x of each column (length `xCells`, west to east). */
+  xCenters: Float64Array;
+  /** Cell-centre y of each row (length `yCells`, south to north). */
+  yCenters: Float64Array;
 }
 
 /**

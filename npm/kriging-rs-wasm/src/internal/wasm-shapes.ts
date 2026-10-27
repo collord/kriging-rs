@@ -50,6 +50,8 @@ export interface WasmUniversalInstance {
 
 /** WASM projected kriging instance shape. */
 export interface WasmProjectedInstance {
+  setNeighborhood(maxNeighbors?: number, maxRadius?: number): void;
+  neighborhood(): unknown;
   predict(x: number, y: number): unknown;
   predictBatch(xs: Float64Array, ys: Float64Array): unknown;
   predictBatchArrays(xs: Float64Array, ys: Float64Array): unknown;
@@ -183,7 +185,9 @@ export type RawModule = {
       values: Float64Array,
       variogram: VariogramSpecWasm,
       majorAngleDeg: number,
-      rangeRatio: number
+      rangeRatio: number,
+      maxNeighbors?: number,
+      maxRadius?: number
     ): WasmProjectedInstance;
   };
   WasmBinomialProjectedKriging?: {

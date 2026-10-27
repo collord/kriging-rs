@@ -4505,3 +4505,160 @@ describe("Planar variography (fitVariogramProjected / computeEmpiricalVariogramP
     }
   });
 });
+
+describe("ProjectedKriging: defaults, neighborhood, fromFitted, predictGrid", () => {
+  // Field rises to the north (y) and east (x), so grid orientation is checkable.
+  const n = 120;
+  const xs = Array.from({ length: n }, (_, i) => ((i * 37) % 101) * 10);
+  const ys = Array.from({ length: n }, (_, i) => ((i * 53) % 97) * 10);
+  const values = xs.map((x, i) => 0.002 * x + 0.01 * ys[i] + Math.sin(x / 150));
+  const variogram = {
+    variogramType: "exponential" as const,
+    nugget: 0.01,
+    sill: 4,
+    range: 600,
+  };
+  const target: [number, number] = [333, 444];
+
+  test("majorAngleDeg / rangeRatio default to isotropic", () => {
+    using implicit = new ProjectedKriging({ xs, ys, values, variogram });
+    using explicit = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    const a = implicit.predict(...target);
+    const b = explicit.predict(...target);
+    expect(a.value).toBe(b.value);
+    expect(a.variance).toBe(b.variance);
+  });
+
+  test("a neighborhood covering every station reproduces the full-data prediction", () => {
+    using full = new ProjectedKriging({ xs, ys, values, variogram });
+    using local = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      neighborhood: { maxNeighbors: n },
+    });
+    expect(full.neighborhood()).toBeNull();
+    expect(local.neighborhood()).toEqual({ maxNeighbors: n });
+    const a = full.predict(...target);
+    const b = local.predict(...target);
+    expect(b.value).toBeCloseTo(a.value, 3);
+    expect(b.variance).toBeCloseTo(a.variance, 3);
+  });
+
+  test("setNeighborhood narrows, clears, and validates", () => {
+    using model = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      neighborhood: { maxNeighbors: 8 },
+    });
+    const narrow = model.predict(...target);
+    model.setNeighborhood({});
+    expect(model.neighborhood()).toBeNull();
+    using full = new ProjectedKriging({ xs, ys, values, variogram });
+    expect(model.predict(...target).value).toBeCloseTo(
+      full.predict(...target).value,
+      4
+    );
+    expect(narrow.value).not.toBeCloseTo(full.predict(...target).value, 6);
+    model.setNeighborhood({ maxNeighbors: 16, maxRadius: 400 });
+    expect(model.neighborhood()).toEqual({ maxNeighbors: 16, maxRadius: 400 });
+    expect(() => model.setNeighborhood({ maxNeighbors: 0 })).toThrow(
+      KrigingError
+    );
+    expect(() => model.setNeighborhood({ maxRadius: -1 })).toThrow(
+      KrigingError
+    );
+  });
+
+  test("a large dataset with a neighborhood builds and predicts", () => {
+    const big = 3000;
+    const bx = Array.from({ length: big }, (_, i) => ((i * 7919) % 1000) * 3.1);
+    const by = Array.from(
+      { length: big },
+      (_, i) => ((i * 104729) % 997) * 2.9
+    );
+    const bv = bx.map((x, i) => Math.sin(x / 400) + Math.cos(by[i] / 300));
+    using model = new ProjectedKriging({
+      xs: bx,
+      ys: by,
+      values: bv,
+      variogram,
+      neighborhood: { maxNeighbors: 24 },
+    });
+    const { values: out } = model.predictBatchArrays(
+      [10, 1500, 2900],
+      [10, 1400, 2800]
+    );
+    for (const v of out) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  test("fromFitted pipes a fitVariogramProjected result and honours nuggetOverride", () => {
+    const fitted = fitVariogramProjected({
+      xs,
+      ys,
+      values,
+      variogramType: "exponential",
+    });
+    using a = ProjectedKriging.fromFitted({
+      xs,
+      ys,
+      values,
+      fittedVariogram: fitted,
+    });
+    using b = new ProjectedKriging({ xs, ys, values, variogram: fitted });
+    expect(a.predict(...target).value).toBe(b.predict(...target).value);
+    using noisy = ProjectedKriging.fromFitted({
+      xs,
+      ys,
+      values,
+      fittedVariogram: fitted,
+      nuggetOverride: fitted.sill * 0.5,
+    });
+    expect(noisy.predict(...target).variance).toBeGreaterThan(
+      a.predict(...target).variance
+    );
+  });
+
+  test("predictGrid: cell centres, row 0 = south, matches predict", () => {
+    using model = new ProjectedKriging({ xs, ys, values, variogram });
+    const grid = model.predictGrid({
+      xMin: 0,
+      xMax: 1000,
+      yMin: 0,
+      yMax: 800,
+      xCells: 5,
+      yCells: 4,
+    });
+    expect(Array.from(grid.xCenters)).toEqual([100, 300, 500, 700, 900]);
+    expect(Array.from(grid.yCenters)).toEqual([100, 300, 500, 700]);
+    expect(grid.values.length).toBe(4);
+    expect(grid.values[0].length).toBe(5);
+    expect(grid.valuesFlat.length).toBe(20);
+    // Row-major, row 0 = yMin: cell (j = 2, i = 3) is at (700, 500).
+    expect(grid.valuesFlat[2 * 5 + 3]).toBe(grid.values[2][3]);
+    expect(grid.values[2][3]).toBeCloseTo(model.predict(700, 500).value, 6);
+    // The field rises northward, so the last row exceeds the first on average.
+    const mean = (row: number[]) => row.reduce((s, v) => s + v, 0) / row.length;
+    expect(mean(grid.values[3])).toBeGreaterThan(mean(grid.values[0]));
+    expect(() =>
+      model.predictGrid({
+        xMin: 5,
+        xMax: 5,
+        yMin: 0,
+        yMax: 1,
+        xCells: 2,
+        yCells: 2,
+      })
+    ).toThrow(KrigingError);
+  });
+});

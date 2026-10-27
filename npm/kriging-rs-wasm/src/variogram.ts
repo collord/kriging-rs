@@ -84,13 +84,11 @@ export function fitVariogram(options: FitVariogramOptions): FittedVariogram {
  * Fit a variogram model to **planar** `(x, y)` sample data (e.g. projected metres). The
  * planar counterpart of {@link fitVariogram}: distances are Euclidean, so the fitted
  * `range` is in the coordinates' units and the result plugs straight into
- * {@link ProjectedKriging}.
+ * {@link ProjectedKriging.fromFitted}.
  *
  * @example
  * const fitted = fitVariogramProjected({ xs, ys, values, variogramType: "spherical" });
- * const model = new ProjectedKriging({
- *   xs, ys, values, variogram: fitted, majorAngleDeg: 0, rangeRatio: 1,
- * });
+ * using model = ProjectedKriging.fromFitted({ xs, ys, values, fittedVariogram: fitted });
  */
 export function fitVariogramProjected(
   options: FitVariogramProjectedOptions

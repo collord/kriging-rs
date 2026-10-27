@@ -157,6 +157,37 @@ pub(super) fn to_coords(lats: &[f64], lons: &[f64]) -> Result<Vec<GeoCoord>, JsV
     Ok(out)
 }
 
+/// `{ maxNeighbors?, maxRadius? }`, or `null` for no neighborhood.
+fn neighborhood_to_js(neighborhood: Option<Neighborhood>) -> JsValue {
+    match neighborhood {
+        None => JsValue::NULL,
+        Some(n) => {
+            let obj = Object::new();
+            if let Some(k) = n.max_neighbors {
+                let _ = set_object_field(&obj, "maxNeighbors", &JsValue::from_f64(k as f64));
+            }
+            if let Some(r) = n.max_radius {
+                let _ = set_object_field(&obj, "maxRadius", &JsValue::from_f64(r as f64));
+            }
+            obj.into()
+        }
+    }
+}
+
+/// JS `(maxNeighbors?, maxRadius?)` to a neighborhood; validation happens in the model.
+fn planar_neighborhood(
+    max_neighbors: Option<usize>,
+    max_radius: Option<f64>,
+) -> Option<Neighborhood> {
+    if max_neighbors.is_none() && max_radius.is_none() {
+        return None;
+    }
+    Some(Neighborhood {
+        max_neighbors,
+        max_radius: max_radius.map(|r| r as Real),
+    })
+}
+
 /// Origin shift for planar `(x, y)` input, applied in `f64` before narrowing to [`Real`].
 ///
 /// Kriging, variograms, cross-validation and simulation depend only on coordinate
@@ -495,19 +526,7 @@ impl WasmOrdinaryKriging {
     /// `null` when no neighborhood is active.
     #[wasm_bindgen(js_name = neighborhood)]
     pub fn neighborhood(&self) -> JsValue {
-        match self.inner.neighborhood() {
-            None => JsValue::NULL,
-            Some(n) => {
-                let obj = Object::new();
-                if let Some(k) = n.max_neighbors {
-                    let _ = set_object_field(&obj, "maxNeighbors", &JsValue::from_f64(k as f64));
-                }
-                if let Some(r) = n.max_radius {
-                    let _ = set_object_field(&obj, "maxRadius", &JsValue::from_f64(r as f64));
-                }
-                obj.into()
-            }
-        }
+        neighborhood_to_js(self.inner.neighborhood())
     }
 
     pub fn predict(&self, lat: f64, lon: f64) -> Result<JsValue, JsValue> {
@@ -1282,7 +1301,9 @@ pub struct WasmProjectedKriging {
 impl WasmProjectedKriging {
     /// Construct a projected (planar) ordinary kriging model on `(x, y)` coordinates with
     /// 2D anisotropy. `majorAngleDeg` is the azimuth of the major correlation axis (degrees
-    /// CCW from +x); `rangeRatio` is the minor/major range ratio in `(0, 1]`.
+    /// CCW from +x); `rangeRatio` is the minor/major range ratio in `(0, 1]`. Passing
+    /// `maxNeighbors` and/or `maxRadius` (coordinate units) builds a neighborhood-only model
+    /// that never factorizes the full-data system; omit both to krige with every station.
     #[wasm_bindgen(js_name = fromArrays)]
     pub fn from_arrays(
         xs: &[f64],
@@ -1291,6 +1312,8 @@ impl WasmProjectedKriging {
         variogram: JsValue,
         major_angle_deg: f64,
         range_ratio: f64,
+        max_neighbors: Option<usize>,
+        max_radius: Option<f64>,
     ) -> Result<WasmProjectedKriging, JsValue> {
         if xs.len() != ys.len() || xs.len() != values.len() {
             return Err(coded_err(
@@ -1305,9 +1328,33 @@ impl WasmProjectedKriging {
         let anisotropy = Anisotropy2D::new(major_angle_deg as Real, range_ratio as Real)
             .map_err(kriging_err_to_js)?;
         let dataset = ProjectedDataset::new(coords, values_real).map_err(kriging_err_to_js)?;
-        let inner =
-            ProjectedKrigingModel::new(dataset, model, anisotropy).map_err(kriging_err_to_js)?;
+        let inner = match planar_neighborhood(max_neighbors, max_radius) {
+            Some(nb) => ProjectedKrigingModel::new_local(dataset, model, anisotropy, nb),
+            None => ProjectedKrigingModel::new(dataset, model, anisotropy),
+        }
+        .map_err(kriging_err_to_js)?;
         Ok(Self { inner, origin })
+    }
+
+    /// Restrict predictions to the `maxNeighbors` nearest stations and/or those within
+    /// `maxRadius` (coordinate units, anisotropic distance). Omit both to use every station,
+    /// which factorizes the full system if the model was built with a neighborhood.
+    #[wasm_bindgen(js_name = setNeighborhood)]
+    pub fn set_neighborhood(
+        &mut self,
+        max_neighbors: Option<usize>,
+        max_radius: Option<f64>,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_neighborhood(planar_neighborhood(max_neighbors, max_radius))
+            .map_err(kriging_err_to_js)
+    }
+
+    /// The active neighborhood as `{ maxNeighbors?, maxRadius? }`, or `null` when every
+    /// station is used.
+    #[wasm_bindgen(js_name = neighborhood)]
+    pub fn neighborhood(&self) -> JsValue {
+        neighborhood_to_js(self.inner.neighborhood())
     }
 
     pub fn predict(&self, x: f64, y: f64) -> Result<JsValue, JsValue> {
