@@ -301,20 +301,92 @@ impl ProjectedDataset {
 /// thousands of stations, use a search [`Neighborhood`] instead: [`new_local`](Self::new_local)
 /// skips the full factorization entirely and solves a small system on the nearest stations
 /// per target. Neighbors are ranked by the *anisotropic* distance, so the search ellipse
-/// matches the variogram.
+/// matches the variogram, and found through a k-d tree rather than a scan.
+///
+/// Internally every coordinate is mapped once into the anisotropy frame (major axis on x,
+/// minor axis stretched by `1 / range_ratio`), where the anisotropic distance is plain
+/// Euclidean distance; no trigonometry is evaluated per pair.
 #[derive(Debug)]
 pub struct ProjectedKrigingModel {
+    /// Station coordinates in the anisotropy frame (see the type docs).
     coords: Vec<ProjectedCoord>,
     values: Vec<Real>,
     variogram: VariogramModel,
     anisotropy: Anisotropy2D,
+    frame: AnisotropyFrame,
     cov_at_zero: Real,
     /// Non-negative extra variance per station on the covariance diagonal (empty means none).
     observation_diagonal: Vec<Real>,
     neighborhood: Option<Neighborhood>,
+    /// Neighbor index over `coords`; present whenever a neighborhood is.
+    index: Option<PlanarIndex>,
     /// Full-data system and its LU; `None` for a model built with [`Self::new_local`] until a
     /// full-data prediction is requested via [`Self::set_neighborhood`]`(None)`.
     global: Option<GlobalSystem>,
+}
+
+/// Linear map into the anisotropy frame: rotate the major axis onto +x, then stretch the
+/// minor axis by `1 / range_ratio`. Euclidean distance there equals
+/// [`Anisotropy2D::distance`] between the original points.
+#[derive(Debug, Clone, Copy)]
+struct AnisotropyFrame {
+    cos: Real,
+    sin: Real,
+    inv_ratio: Real,
+}
+
+impl AnisotropyFrame {
+    fn new(anisotropy: Anisotropy2D) -> Self {
+        let theta = anisotropy.major_angle_deg.to_radians();
+        Self {
+            cos: theta.cos(),
+            sin: theta.sin(),
+            inv_ratio: 1.0 / anisotropy.range_ratio,
+        }
+    }
+
+    fn apply(self, c: ProjectedCoord) -> ProjectedCoord {
+        ProjectedCoord::new(
+            c.x * self.cos + c.y * self.sin,
+            (-c.x * self.sin + c.y * self.cos) * self.inv_ratio,
+        )
+    }
+}
+
+type PlanarTree = kiddo::immutable::float::kdtree::ImmutableKdTree<f64, u64, 2, 32>;
+
+#[derive(Debug, Clone)]
+struct PlanarIndex(PlanarTree);
+
+impl PlanarIndex {
+    fn build(coords: &[ProjectedCoord]) -> Self {
+        let entries: Vec<[f64; 2]> = coords.iter().map(|c| [c.x as f64, c.y as f64]).collect();
+        Self((&*entries).into())
+    }
+
+    /// `(station, distance)` pairs selected by `neighborhood`, for a target already in the
+    /// anisotropy frame.
+    fn select(&self, target: ProjectedCoord, neighborhood: Neighborhood) -> Vec<(usize, Real)> {
+        use kiddo::SquaredEuclidean;
+        let q = [target.x as f64, target.y as f64];
+        let found = match (neighborhood.max_neighbors, neighborhood.max_radius) {
+            (Some(k), _) => {
+                let k = NonZeroUsize::new(k).expect("validated: max_neighbors >= 1");
+                self.0.nearest_n::<SquaredEuclidean>(&q, k)
+            }
+            (None, Some(r)) => {
+                let r = r as f64;
+                self.0.within_unsorted::<SquaredEuclidean>(&q, r * r)
+            }
+            (None, None) => unreachable!("validated: an empty neighborhood is None"),
+        };
+        let radius = neighborhood.max_radius;
+        found
+            .into_iter()
+            .map(|nn| (nn.item as usize, nn.distance.sqrt() as Real))
+            .filter(|&(_, d)| radius.is_none_or(|r| d <= r))
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -340,8 +412,10 @@ impl Clone for ProjectedKrigingModel {
             variogram: self.variogram,
             anisotropy: self.anisotropy,
             cov_at_zero: self.cov_at_zero,
+            frame: self.frame,
             observation_diagonal: self.observation_diagonal.clone(),
             neighborhood: self.neighborhood,
+            index: self.index.clone(),
             global: self.global.clone(),
         }
     }
@@ -372,11 +446,16 @@ impl ProjectedKrigingModel {
                 "new_local needs a neighborhood with maxNeighbors and/or maxRadius".to_string(),
             )
         })?;
+        let frame = AnisotropyFrame::new(anisotropy);
+        let coords: Vec<ProjectedCoord> =
+            dataset.coords.into_iter().map(|c| frame.apply(c)).collect();
         Ok(Self {
-            coords: dataset.coords,
+            index: Some(PlanarIndex::build(&coords)),
+            coords,
             values: dataset.values,
             variogram,
             anisotropy,
+            frame,
             cov_at_zero: variogram.covariance(0.0),
             observation_diagonal: Vec::new(),
             neighborhood: Some(neighborhood),
@@ -420,14 +499,17 @@ impl ProjectedKrigingModel {
                 "internal: extra length mismatch for projected kriging".to_string(),
             ));
         }
+        let frame = AnisotropyFrame::new(anisotropy);
         let mut model = Self {
-            coords: dataset.coords,
+            coords: dataset.coords.into_iter().map(|c| frame.apply(c)).collect(),
             values: dataset.values,
             variogram,
             anisotropy,
+            frame,
             cov_at_zero: variogram.covariance(0.0),
             observation_diagonal: extra.to_vec(),
             neighborhood: None,
+            index: None,
             global: None,
         };
         model.global = Some(model.factorize_global()?);
@@ -444,7 +526,7 @@ impl ProjectedKrigingModel {
             let si = idx[a];
             for b in a..k {
                 let sj = idx[b];
-                let d = self.anisotropy.distance(self.coords[si], self.coords[sj]);
+                let d = euclidean_distance(self.coords[si], self.coords[sj]);
                 let mut cov = self.variogram.covariance(d);
                 if a == b {
                     cov += diag_eps;
@@ -499,6 +581,9 @@ impl ProjectedKrigingModel {
         };
         if neighborhood.is_none() && self.global.is_none() {
             self.global = Some(self.factorize_global()?);
+        }
+        if neighborhood.is_some() && self.index.is_none() {
+            self.index = Some(PlanarIndex::build(&self.coords));
         }
         self.neighborhood = neighborhood;
         Ok(())
@@ -564,23 +649,11 @@ impl ProjectedKrigingModel {
         coord: ProjectedCoord,
         neighborhood: Neighborhood,
     ) -> Result<Prediction, KrigingError> {
-        let mut indexed: Vec<(usize, Real)> = self
-            .coords
-            .iter()
-            .enumerate()
-            .map(|(i, &c)| (i, self.anisotropy.distance(c, coord)))
-            .collect();
-        if let Some(r) = neighborhood.max_radius {
-            indexed.retain(|(_, d)| *d <= r);
-        }
-        if let Some(k) = neighborhood.max_neighbors
-            && indexed.len() > k
-        {
-            indexed.select_nth_unstable_by(k, |a, b| {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            indexed.truncate(k);
-        }
+        let index = self
+            .index
+            .as_ref()
+            .expect("an index is built whenever a neighborhood is set");
+        let indexed = index.select(self.frame.apply(coord), neighborhood);
         let k = indexed.len();
         if k == 0 {
             return Err(KrigingError::InvalidInput(
@@ -619,9 +692,11 @@ impl ProjectedKrigingModel {
             )
         })?;
         let n = self.coords.len();
+        let target = self.frame.apply(coord);
         for i in 0..n {
-            let d = self.anisotropy.distance(self.coords[i], coord);
-            rhs[i] = self.variogram.covariance(d);
+            rhs[i] = self
+                .variogram
+                .covariance(euclidean_distance(self.coords[i], target));
         }
         rhs[n] = 1.0;
         let sol = global.lu.solve(rhs).ok_or_else(|| {
@@ -1019,10 +1094,14 @@ mod tests {
         let local =
             ProjectedKrigingModel::new_local(ds.clone(), vg, aniso, Neighborhood::nearest(n))
                 .unwrap();
-        let toggled = ProjectedKrigingModel::new(ds, vg, aniso)
+        let toggled = ProjectedKrigingModel::new(ds.clone(), vg, aniso)
             .unwrap()
             .with_neighborhood(Some(Neighborhood::nearest(n)))
             .unwrap();
+        // Radius-only neighborhoods take the k-d tree's range query instead of k-nearest.
+        let by_radius =
+            ProjectedKrigingModel::new_local(ds, vg, aniso, Neighborhood::within_radius(1e6))
+                .unwrap();
         let targets = [
             ProjectedCoord::new(12.0, 30.0),
             ProjectedCoord::new(150.0, 90.0),
@@ -1032,6 +1111,7 @@ mod tests {
             let g = global.predict(t).unwrap();
             assert_same(g, local.predict(t).unwrap());
             assert_same(g, toggled.predict(t).unwrap());
+            assert_same(g, by_radius.predict(t).unwrap());
         }
         let batch = local.predict_batch(&targets).unwrap();
         for (&t, b) in targets.iter().zip(batch) {
