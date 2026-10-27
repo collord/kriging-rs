@@ -107,13 +107,10 @@ function mapZeroTrialDroppedIndices(value: unknown): number[] {
 export function mapBinomialBuildNotes(value: unknown): BinomialBuildNotes {
   const rec = asRecord(value);
   const priorRaw = rec.prior ?? rec.Prior;
-  const calVer =
-    rec.calibrationVersion ?? rec.calibration_version;
-  const logitInfl =
-    rec.logitInflation ?? rec.logit_inflation;
+  const calVer = rec.calibrationVersion ?? rec.calibration_version;
+  const logitInfl = rec.logitInflation ?? rec.logit_inflation;
   const nAttempts = rec.nBuildAttempts ?? rec.n_build_attempts;
-  const dropped =
-    rec.zeroTrialDroppedIndices ?? rec.zero_trial_dropped_indices;
+  const dropped = rec.zeroTrialDroppedIndices ?? rec.zero_trial_dropped_indices;
   const fromLogitsOnly =
     rec.fromPrecomputedLogitsOnly ?? rec.from_precomputed_logits_only;
   if (typeof fromLogitsOnly !== "boolean") {

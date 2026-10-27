@@ -169,8 +169,7 @@ export interface DateAxisOptions {
  * configuration.
  */
 export interface PredictGridAtDateOptions
-  extends PredictGridOptions,
-    DateAxisOptions {
+  extends PredictGridOptions, DateAxisOptions {
   /** Date at which to evaluate every grid cell. */
   date: Date;
 }
@@ -368,8 +367,7 @@ export interface BinomialGridEnsemble extends GeoGridBounds {
  * scale by default (the natural reporting scale for disease maps); set
  * `summarizeOn: "logit"` to report on the logit scale instead.
  */
-export interface SimulateBinomialGridSummaryOptions
-  extends SimulateBinomialGridEnsembleOptions {
+export interface SimulateBinomialGridSummaryOptions extends SimulateBinomialGridEnsembleOptions {
   /**
    * Probabilities in `[0, 1]` to report (e.g. `[0.025, 0.5, 0.975]` for a 95% CI
    * around the median). Pass an empty list to skip quantile computation.
@@ -418,8 +416,10 @@ export interface SimulateBinomialSpaceTimeGridOptions extends GeoGridBounds {
  * flat row-major ensemble buffers (same layout as
  * {@link BinomialSimulationManyResult}).
  */
-export interface SimulateBinomialSpaceTimeGridEnsembleOptions
-  extends Omit<SimulateBinomialSpaceTimeGridOptions, "seed"> {
+export interface SimulateBinomialSpaceTimeGridEnsembleOptions extends Omit<
+  SimulateBinomialSpaceTimeGridOptions,
+  "seed"
+> {
   nRealizations: number;
   /** Base seed; the k-th realization uses `baseSeed + k`. */
   baseSeed?: number | bigint;
@@ -430,8 +430,7 @@ export interface SimulateBinomialSpaceTimeGridEnsembleOptions
  * a fixed `time` and reduce it to per-cell summary maps in one call. Mirrors
  * {@link SimulateBinomialGridSummaryOptions}.
  */
-export interface SimulateBinomialSpaceTimeGridSummaryOptions
-  extends SimulateBinomialSpaceTimeGridEnsembleOptions {
+export interface SimulateBinomialSpaceTimeGridSummaryOptions extends SimulateBinomialSpaceTimeGridEnsembleOptions {
   quantiles?: ReadonlyArray<number>;
   exceedanceThresholds?: ReadonlyArray<number>;
   summarizeOn?: "prevalence" | "logit";
@@ -444,8 +443,7 @@ export interface SimulateBinomialSpaceTimeGridSummaryOptions
  * model's numeric time axis.
  */
 export interface SimulateBinomialSpaceTimeGridAtDateOptions
-  extends GeoGridBounds,
-    DateAxisOptions {
+  extends GeoGridBounds, DateAxisOptions {
   lats: NumericArrayInput;
   lons: NumericArrayInput;
   /** Conditioning station dates. */
@@ -460,15 +458,16 @@ export interface SimulateBinomialSpaceTimeGridAtDateOptions
 }
 
 /** Date-aware variant of {@link SimulateBinomialSpaceTimeGridEnsembleOptions}. */
-export interface SimulateBinomialSpaceTimeGridEnsembleAtDateOptions
-  extends Omit<SimulateBinomialSpaceTimeGridAtDateOptions, "seed"> {
+export interface SimulateBinomialSpaceTimeGridEnsembleAtDateOptions extends Omit<
+  SimulateBinomialSpaceTimeGridAtDateOptions,
+  "seed"
+> {
   nRealizations: number;
   baseSeed?: number | bigint;
 }
 
 /** Date-aware variant of {@link SimulateBinomialSpaceTimeGridSummaryOptions}. */
-export interface SimulateBinomialSpaceTimeGridSummaryAtDateOptions
-  extends SimulateBinomialSpaceTimeGridEnsembleAtDateOptions {
+export interface SimulateBinomialSpaceTimeGridSummaryAtDateOptions extends SimulateBinomialSpaceTimeGridEnsembleAtDateOptions {
   quantiles?: ReadonlyArray<number>;
   exceedanceThresholds?: ReadonlyArray<number>;
   summarizeOn?: "prevalence" | "logit";
@@ -798,8 +797,7 @@ export interface BinomialProjectedKrigingOptions {
 }
 
 /** Options for {@link BinomialProjectedKriging.newWithPrior}. */
-export interface BinomialProjectedKrigingWithPriorOptions
-  extends BinomialProjectedKrigingOptions {
+export interface BinomialProjectedKrigingWithPriorOptions extends BinomialProjectedKrigingOptions {
   prior: BinomialPriorParams;
 }
 
@@ -1015,8 +1013,7 @@ export interface LeaveOneOutBinomialProjectedOptions {
 }
 
 /** Options for {@link kFoldBinomialProjected}. */
-export interface KFoldBinomialProjectedOptions
-  extends LeaveOneOutBinomialProjectedOptions {
+export interface KFoldBinomialProjectedOptions extends LeaveOneOutBinomialProjectedOptions {
   /** Number of folds, must satisfy `2 ≤ k ≤ n`. */
   k: number;
 }
@@ -1115,8 +1112,10 @@ export interface ConditionalSimulateOptions {
  * realization is drawn with `baseSeed + BigInt(k)` so every draw is independent yet
  * deterministic.
  */
-export interface ConditionalSimulateManyOptions
-  extends Omit<ConditionalSimulateOptions, "seed"> {
+export interface ConditionalSimulateManyOptions extends Omit<
+  ConditionalSimulateOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1211,8 +1210,10 @@ export interface BinomialSimulationResult {
  * the k-th row of the result is bit-identical to a single
  * {@link conditionalSimulateBinomial} call with that seed.
  */
-export interface ConditionalSimulateManyBinomialOptions
-  extends Omit<ConditionalSimulateBinomialOptions, "seed"> {
+export interface ConditionalSimulateManyBinomialOptions extends Omit<
+  ConditionalSimulateBinomialOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1249,8 +1250,10 @@ export interface ConditionalSimulateBinomialProjectedOptions {
  * {@link ConditionalSimulateBinomialProjectedOptions} but with `nRealizations`
  * and `baseSeed` instead of `seed`.
  */
-export interface ConditionalSimulateManyBinomialProjectedOptions
-  extends Omit<ConditionalSimulateBinomialProjectedOptions, "seed"> {
+export interface ConditionalSimulateManyBinomialProjectedOptions extends Omit<
+  ConditionalSimulateBinomialProjectedOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1262,8 +1265,10 @@ export interface ConditionalSimulateManyBinomialProjectedOptions
  * {@link ConditionalSimulateSpaceTimeBinomialOptions} but with `nRealizations` and
  * `baseSeed` instead of `seed`.
  */
-export interface ConditionalSimulateManySpaceTimeBinomialOptions
-  extends Omit<ConditionalSimulateSpaceTimeBinomialOptions, "seed"> {
+export interface ConditionalSimulateManySpaceTimeBinomialOptions extends Omit<
+  ConditionalSimulateSpaceTimeBinomialOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. */
@@ -1488,14 +1493,12 @@ export interface SpaceTimeOrdinaryKrigingFromFittedOptions {
 }
 
 /** Options for {@link SpaceTimeSimpleKriging.fromFitted}. */
-export interface SpaceTimeSimpleKrigingFromFittedOptions
-  extends SpaceTimeOrdinaryKrigingFromFittedOptions {
+export interface SpaceTimeSimpleKrigingFromFittedOptions extends SpaceTimeOrdinaryKrigingFromFittedOptions {
   mean: number;
 }
 
 /** Options for {@link SpaceTimeUniversalKriging.fromFitted}. */
-export interface SpaceTimeUniversalKrigingFromFittedOptions
-  extends SpaceTimeOrdinaryKrigingFromFittedOptions {
+export interface SpaceTimeUniversalKrigingFromFittedOptions extends SpaceTimeOrdinaryKrigingFromFittedOptions {
   trend: SpaceTimeUniversalTrend;
 }
 
@@ -1691,8 +1694,10 @@ export interface ConditionalSimulateSpaceTimeOptions {
  * Options for {@link conditionalSimulateManySpaceTime}. Mirrors
  * {@link ConditionalSimulateManyOptions} for the space-time ordinary variant.
  */
-export interface ConditionalSimulateManySpaceTimeOptions
-  extends Omit<ConditionalSimulateSpaceTimeOptions, "seed"> {
+export interface ConditionalSimulateManySpaceTimeOptions extends Omit<
+  ConditionalSimulateSpaceTimeOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1941,8 +1946,7 @@ export interface FitSpherical3DTwoStageOptions extends FitSpherical3DOptions {
  * Options for {@link fitSpherical3DFixedNugget}: refit with the nugget held at
  * a user-supplied value (e.g. read off the vertical's short-lag intercept).
  */
-export interface FitSpherical3DFixedNuggetOptions
-  extends FitSpherical3DOptions {
+export interface FitSpherical3DFixedNuggetOptions extends FitSpherical3DOptions {
   /** Nugget value to hold fixed during the fit. */
   nugget: number;
 }

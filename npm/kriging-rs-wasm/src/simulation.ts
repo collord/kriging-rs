@@ -28,9 +28,7 @@ import {
 } from "./internal/convert.js";
 import { requireLoadedModule } from "./internal/module.js";
 import { resolveBinomialPrior } from "./internal/prior.js";
-import {
-  requireSpaceTimeUniversalTrend,
-} from "./internal/spacetime.js";
+import { requireSpaceTimeUniversalTrend } from "./internal/spacetime.js";
 import type {
   BinomialSimulationManyResult,
   BinomialSimulationResult,

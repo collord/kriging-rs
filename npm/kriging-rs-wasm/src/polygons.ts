@@ -37,7 +37,9 @@ function selectSamples(
   ensemble: BinomialGridEnsemble | BinomialSimulationManyResult,
   summarizeOn: "prevalence" | "logit"
 ): Float64Array {
-  return summarizeOn === "logit" ? ensemble.logitSamples : ensemble.prevalenceSamples;
+  return summarizeOn === "logit"
+    ? ensemble.logitSamples
+    : ensemble.prevalenceSamples;
 }
 
 function validatePolygons(
@@ -138,9 +140,12 @@ export function aggregatePrevalenceByPolygon(
   const nRealizations = ensemble.nRealizations;
   const nTargets = ensemble.nTargets;
   if (!Number.isInteger(nRealizations) || nRealizations < 1) {
-    throw new KrigingError("ensemble.nRealizations must be a positive integer", {
-      code: "invalid_input",
-    });
+    throw new KrigingError(
+      "ensemble.nRealizations must be a positive integer",
+      {
+        code: "invalid_input",
+      }
+    );
   }
   if (!Number.isInteger(nTargets) || nTargets < 1) {
     throw new KrigingError("ensemble.nTargets must be a positive integer", {
