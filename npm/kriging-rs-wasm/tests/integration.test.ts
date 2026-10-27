@@ -2108,6 +2108,16 @@ describe("Uninitialized API", () => {
     });
     expect(result.status).toBe(0);
   });
+
+  test("init() without bytes under Node explains the kriging-rs-wasm/wasm export (subprocess)", () => {
+    const scriptPath = resolve(pkgDir, "scripts/assert-node-init-guidance.mjs");
+    const result = spawnSync(process.execPath, [scriptPath], {
+      cwd: pkgDir,
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
 });
 
 describe("Space-time kriging", () => {

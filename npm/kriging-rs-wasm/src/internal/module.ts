@@ -66,8 +66,21 @@ export const VariogramType: RawModule["WasmVariogramType"] = new Proxy(
  * Can be called with no arguments (loads WASM from the default location) or with pre-fetched
  * WASM bytes (e.g. from a custom URL or bundler) for offline or custom loading.
  *
+ * In a browser (or a Web Worker) the default loader fetches `kriging_rs_bg.wasm` next to
+ * the package's JS; bundlers such as Vite emit it as an asset automatically. **Node** has
+ * no `fetch` for `file:` URLs, so pass the bytes, located via the `kriging-rs-wasm/wasm`
+ * export:
+ *
+ * ```ts
+ * import { readFile } from "node:fs/promises";
+ * import { fileURLToPath } from "node:url";
+ * await init(await readFile(fileURLToPath(import.meta.resolve("kriging-rs-wasm/wasm"))));
+ * ```
+ *
  * @param input - Optional: `ArrayBuffer` or `Response` of WASM bytes; omit to use default loader
  * @returns Promise that resolves with `undefined` when initialization is complete
+ * @throws {KrigingError} With code `not_loaded` when the default loader cannot fetch the
+ *   binary (e.g. called without bytes under Node); the message says what to pass instead.
  * @example
  * await init();
  * const model = new OrdinaryKriging({ lats, lons, values, variogram: { variogramType: "gaussian", nugget: 0.01, sill: 1, range: 100 } });
@@ -76,7 +89,21 @@ export const VariogramType: RawModule["WasmVariogramType"] = new Proxy(
 export async function init(input?: unknown): Promise<void> {
   const mod = await loadRawModule();
   if (input === undefined) {
-    await mod.default();
+    try {
+      await mod.default();
+    } catch (e) {
+      const proc = (
+        globalThis as { process?: { versions?: { node?: unknown } } }
+      ).process;
+      const inNode = typeof proc?.versions?.node === "string";
+      throw new KrigingError(
+        inNode
+          ? "init() could not fetch the WASM binary: Node has no fetch for file: URLs. Pass " +
+              'the bytes instead: init(await readFile(fileURLToPath(import.meta.resolve("kriging-rs-wasm/wasm"))))'
+          : "init() could not fetch the WASM binary; pass its bytes or URL, e.g. init(await fetch(wasmUrl))",
+        { code: "not_loaded", cause: e }
+      );
+    }
   } else if (
     typeof input === "object" &&
     input !== null &&
