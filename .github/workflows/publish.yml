@@ -68,7 +68,10 @@ jobs:
           cache: npm
           cache-dependency-path: npm/kriging-rs-wasm/package-lock.json
           registry-url: "https://registry.npmjs.org"
-      - uses: jetli/wasm-pack-action@v0.4.0
+      # jetli/wasm-pack-action fails on current runners (EXDEV renaming /tmp -> ~/.cargo/bin).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: npm build and verify tarball
         working-directory: npm/kriging-rs-wasm
         run: |
@@ -111,7 +114,10 @@ jobs:
           cache: npm
           cache-dependency-path: npm/kriging-rs-wasm/package-lock.json
           registry-url: "https://registry.npmjs.org"
-      - uses: jetli/wasm-pack-action@v0.4.0
+      # jetli/wasm-pack-action fails on current runners (EXDEV renaming /tmp -> ~/.cargo/bin).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: Build, verify tarball, and publish npm package
         working-directory: npm/kriging-rs-wasm
         run: |

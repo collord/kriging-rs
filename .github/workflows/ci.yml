@@ -58,7 +58,10 @@ jobs:
             npm/kriging-rs-wasm/package-lock.json
             examples/web-2d/package-lock.json
             www/package-lock.json
-      - uses: jetli/wasm-pack-action@v0.4.0
+      # jetli/wasm-pack-action fails on current runners (EXDEV renaming /tmp -> ~/.cargo/bin).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: Verify TypeScript WASM package
         working-directory: npm/kriging-rs-wasm
         run: npm ci && npm run verify
