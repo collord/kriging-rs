@@ -54,11 +54,22 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: npm/kriging-rs-wasm/package-lock.json
+          cache-dependency-path: |
+            npm/kriging-rs-wasm/package-lock.json
+            examples/web-2d/package-lock.json
+            www/package-lock.json
       - uses: jetli/wasm-pack-action@v0.4.0
       - name: Verify TypeScript WASM package
         working-directory: npm/kriging-rs-wasm
         run: npm ci && npm run verify
+      # The web apps consume the package built above via file: links, so API drift
+      # breaks the build here instead of silently rotting.
+      - name: Build and check the 2-D web starter
+        working-directory: examples/web-2d
+        run: npm ci && npm run build && npm run check
+      - name: Build the www demo
+        working-directory: www
+        run: npm ci && npm run build
       - name: Dry-run npm publish
         working-directory: npm/kriging-rs-wasm
         run: npm publish --dry-run

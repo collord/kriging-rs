@@ -24,6 +24,8 @@ import {
   interpolateBinomialToGrid,
   computeEmpiricalVariogram,
   computeDirectionalEmpiricalVariogram,
+  computeEmpiricalVariogramProjected,
+  fitVariogramProjected,
   leaveOneOut,
   kFold,
   leaveOneOutSimple,
@@ -86,7 +88,17 @@ import {
   fitSpherical3DFixedNugget,
   fitSpherical3DJoint,
   fitSpherical3DTwoStage,
+  fitVariogram3DFixedNugget,
+  fitVariogram3DJoint,
+  fitVariogram3DTwoStage,
   gaussianSimulation3D,
+  cokrige,
+  cokrigeCollocated,
+  collocatedCosimulate,
+  collocatedSecondaryFromPaired,
+  computeCrossVariogram,
+  cosimulateMultiVariable,
+  fitLmc,
   type OrdinaryPrediction,
   type BinomialPrediction,
   type VariogramTypeName,
@@ -1614,7 +1626,7 @@ describe("Conditional simulation", () => {
         targetLons,
         variogram,
         nRealizations: 0,
-      }),
+      })
     ).toThrow(KrigingError);
   });
 
@@ -2103,6 +2115,16 @@ describe("Uninitialized API", () => {
     });
     expect(result.status).toBe(0);
   });
+
+  test("init() without bytes under Node explains the kriging-rs-wasm/wasm export (subprocess)", () => {
+    const scriptPath = resolve(pkgDir, "scripts/assert-node-init-guidance.mjs");
+    const result = spawnSync(process.execPath, [scriptPath], {
+      cwd: pkgDir,
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
 });
 
 describe("Space-time kriging", () => {
@@ -2489,7 +2511,12 @@ describe("Space-time kriging", () => {
       const date = new Date(12 * 3_600_000);
       const dates = [date, date];
       const opts = { timeUnit: "hours" as const };
-      const fromDates = model.predictBatchAtDates([0.5, 0.5], [0.5, 0.5], dates, opts);
+      const fromDates = model.predictBatchAtDates(
+        [0.5, 0.5],
+        [0.5, 0.5],
+        dates,
+        opts
+      );
       const fromArrays = model.predictBatchArraysAtDates(
         [0.5, 0.5],
         [0.5, 0.5],
@@ -3523,7 +3550,7 @@ describe("Polygon aggregation over ensembles", () => {
     // For polygon "right-half": realization k area-mean = k*0.1 + 0.04
     // -> mean = 0.24, var = 0.025
     expect(result[1].mean).toBeCloseTo(0.24, 6);
-    expect((result[1].variance as number)).toBeCloseTo(0.025, 6);
+    expect(result[1].variance as number).toBeCloseTo(0.025, 6);
   });
 
   test("aggregatePrevalenceByPolygon: weighted mean honors per-cell weights", () => {
@@ -3783,7 +3810,9 @@ function gridSamples3D(n: number) {
         ys.push(y);
         zs.push(z);
         values.push(
-          Math.sin(x / 5) + Math.cos(y / 5) + 0.5 * Math.sin(z / 3) +
+          Math.sin(x / 5) +
+            Math.cos(y / 5) +
+            0.5 * Math.sin(z / 3) +
             0.1 * Math.sin(7.3 * i + 11.9 * j + 17.7 * k)
         );
       }
@@ -3827,17 +3856,31 @@ describe("3-D ordinary kriging", () => {
     // is what the VariogramSpec boundary buys the 3-D surface (a bare
     // scalar API could only carry the first shape, nu).
     const lowAlpha = new OrdinaryKriging3D({
-      xs, ys, zs, values,
+      xs,
+      ys,
+      zs,
+      values,
       variogram: {
         variogramType: "confluenthypergeometric",
-        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 0.5,
+        nugget: 0.01,
+        sill: 100,
+        range: 15,
+        shape: 1.0,
+        shape2: 0.5,
       },
     });
     const highAlpha = new OrdinaryKriging3D({
-      xs, ys, zs, values,
+      xs,
+      ys,
+      zs,
+      values,
       variogram: {
         variogramType: "confluenthypergeometric",
-        nugget: 0.01, sill: 100, range: 15, shape: 1.0, shape2: 5.0,
+        nugget: 0.01,
+        sill: 100,
+        range: 15,
+        shape: 1.0,
+        shape2: 5.0,
       },
     });
     try {
@@ -4122,7 +4165,10 @@ describe("3-D directional variogram and spherical fits", () => {
     expect(spherical.variogramType).toBe("spherical");
     expect(spherical.shape).toBeNull();
 
-    const gaussian = fitSpherical3DJoint({ ...input, variogramType: "gaussian" });
+    const gaussian = fitSpherical3DJoint({
+      ...input,
+      variogramType: "gaussian",
+    });
     expect(gaussian.variogramType).toBe("gaussian");
     expect(gaussian.rangeMajor).toBeGreaterThan(0);
 
@@ -4248,5 +4294,560 @@ describe("3-D sequential Gaussian simulation", () => {
         },
       })
     ).toThrow(boom);
+  });
+});
+
+describe("Large projected coordinates (f32 precision)", () => {
+  // UTM-scale offsets: in f32, a northing near 4.1e6 m resolves to ~0.5 m. The WASM
+  // boundary centres coordinates in f64 before narrowing, so shifting the whole dataset
+  // must not change any result.
+  const X0 = 512_345.678;
+  const Y0 = 4_123_456.789;
+  const n = 60;
+  const local = Array.from({ length: n }, (_, i) => ({
+    x: ((i * 37) % 23) * 41.3 + (i % 5) * 7.1,
+    y: ((i * 53) % 29) * 33.7 + (i % 7) * 5.3,
+  }));
+  const values = local.map(
+    ({ x, y }) => 10 + Math.sin(x / 300) * 3 + Math.cos(y / 250) * 2
+  );
+  const xsLocal = local.map((p) => p.x);
+  const ysLocal = local.map((p) => p.y);
+  const xsUtm = xsLocal.map((x) => x + X0);
+  const ysUtm = ysLocal.map((y) => y + Y0);
+  const variogram = {
+    variogramType: "exponential" as const,
+    nugget: 0.05,
+    sill: 4,
+    range: 800,
+  };
+  const targets = [
+    [12.5, 17.25],
+    [400.1, 333.3],
+    [777.7, 640.4],
+  ];
+
+  test("ProjectedKriging predictions are invariant to a UTM-scale shift", () => {
+    using a = new ProjectedKriging({
+      xs: xsLocal,
+      ys: ysLocal,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    using b = new ProjectedKriging({
+      xs: xsUtm,
+      ys: ysUtm,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    for (const [x, y] of targets) {
+      const pa = a.predict(x, y);
+      const pb = b.predict(x + X0, y + Y0);
+      expect(Math.abs(pa.value - pb.value)).toBeLessThan(1e-4);
+      expect(Math.abs(pa.variance - pb.variance)).toBeLessThan(1e-4);
+    }
+  });
+
+  test("OrdinaryKriging3D predictions are invariant to a UTM-scale shift", () => {
+    const zs = local.map((_, i) => (i % 4) * 2.5);
+    using a = new OrdinaryKriging3D({
+      xs: xsLocal,
+      ys: ysLocal,
+      zs,
+      values,
+      variogram,
+    });
+    using b = new OrdinaryKriging3D({
+      xs: xsUtm,
+      ys: ysUtm,
+      zs: zs.map((z) => z + 1_000),
+      values,
+      variogram,
+    });
+    for (const [x, y] of targets) {
+      const pa = a.predict(x, y, 3);
+      const pb = b.predict(x + X0, y + Y0, 1_003);
+      expect(Math.abs(pa.value - pb.value)).toBeLessThan(1e-4);
+      expect(Math.abs(pa.variance - pb.variance)).toBeLessThan(1e-4);
+    }
+  });
+
+  test("directional empirical variogram is invariant to a UTM-scale shift", () => {
+    const opts = {
+      values,
+      maxDistance: 1000,
+      nBins: 10,
+      azimuthDeg: 0,
+      toleranceDeg: 90,
+    };
+    const a = computeDirectionalEmpiricalVariogram({
+      xs: xsLocal,
+      ys: ysLocal,
+      ...opts,
+    });
+    const b = computeDirectionalEmpiricalVariogram({
+      xs: xsUtm,
+      ys: ysUtm,
+      ...opts,
+    });
+    expect(Array.from(b.counts)).toEqual(Array.from(a.counts));
+    for (let i = 0; i < a.distances.length; i++) {
+      expect(Math.abs(a.distances[i] - b.distances[i])).toBeLessThan(1e-3);
+      expect(Math.abs(a.semivariances[i] - b.semivariances[i])).toBeLessThan(
+        1e-4
+      );
+    }
+  });
+
+  test("conditionalSimulateProjected realizations are invariant to a UTM-scale shift", () => {
+    const tx = targets.map(([x]) => x);
+    const ty = targets.map(([, y]) => y);
+    const common = {
+      conditioningValues: values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+      seed: 7,
+    };
+    const a = conditionalSimulateProjected({
+      ...common,
+      conditioningXs: xsLocal,
+      conditioningYs: ysLocal,
+      targetXs: tx,
+      targetYs: ty,
+    });
+    const b = conditionalSimulateProjected({
+      ...common,
+      conditioningXs: xsUtm,
+      conditioningYs: ysUtm,
+      targetXs: tx.map((x) => x + X0),
+      targetYs: ty.map((y) => y + Y0),
+    });
+    for (let i = 0; i < a.length; i++) {
+      expect(Math.abs(a[i] - b[i])).toBeLessThan(1e-5);
+    }
+  });
+});
+
+describe("Planar variography (fitVariogramProjected / computeEmpiricalVariogramProjected)", () => {
+  // A smooth field on a 0–10 km square, sampled at 80 scattered points (coordinates in km).
+  const n = 80;
+  const xsKm = Array.from({ length: n }, (_, i) => ((i * 37) % 97) / 9.7);
+  const ysKm = Array.from({ length: n }, (_, i) => ((i * 61) % 89) / 8.9);
+  const values = xsKm.map(
+    (x, i) => 5 + 2 * Math.sin(x / 2.1) + 1.5 * Math.cos(ysKm[i] / 1.7)
+  );
+
+  test("omnidirectional planar variogram equals the directional one at 90° tolerance", () => {
+    const omni = computeEmpiricalVariogramProjected({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      maxDistance: 6,
+      nBins: 10,
+    });
+    const dir = computeDirectionalEmpiricalVariogram({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      maxDistance: 6,
+      nBins: 10,
+      azimuthDeg: 0,
+      toleranceDeg: 90,
+    });
+    expect(Array.from(omni.counts)).toEqual(Array.from(dir.counts));
+    for (let i = 0; i < omni.semivariances.length; i++) {
+      expect(omni.semivariances[i]).toBeCloseTo(dir.semivariances[i], 5);
+    }
+  });
+
+  test("fitted range is in coordinate units (km vs m differ by exactly 1000x)", () => {
+    for (const variogramType of [
+      "spherical",
+      "exponential",
+      "gaussian",
+    ] as const) {
+      const km = fitVariogramProjected({
+        xs: xsKm,
+        ys: ysKm,
+        values,
+        variogramType,
+      });
+      const m = fitVariogramProjected({
+        xs: xsKm.map((x) => x * 1000),
+        ys: ysKm.map((y) => y * 1000),
+        values,
+        variogramType,
+      });
+      expect(m.variogramType).toBe(variogramType);
+      expect(m.range / km.range).toBeCloseTo(1000, 0);
+      expect(m.sill).toBeCloseTo(km.sill, 3);
+      expect(m.nugget).toBeCloseTo(km.nugget, 3);
+      expect(km.range).toBeGreaterThan(0);
+      expect(km.range).toBeLessThan(50);
+    }
+  });
+
+  test("fitted model plugs straight into ProjectedKriging", () => {
+    const fitted = fitVariogramProjected({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      variogramType: "exponential",
+    });
+    using model = new ProjectedKriging({
+      xs: xsKm,
+      ys: ysKm,
+      values,
+      variogram: fitted,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    const p = model.predict(xsKm[3], ysKm[3]);
+    expect(p.value).toBeCloseTo(values[3], 1);
+  });
+
+  test("mismatched arrays raise a coded KrigingError", () => {
+    try {
+      computeEmpiricalVariogramProjected({
+        xs: [0, 1, 2],
+        ys: [0, 1],
+        values: [1, 2, 3],
+      });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(KrigingError);
+      expect((e as KrigingError).code).toBe("mismatched_arrays");
+    }
+  });
+});
+
+describe("ProjectedKriging: defaults, neighborhood, fromFitted, predictGrid", () => {
+  // Field rises to the north (y) and east (x), so grid orientation is checkable.
+  const n = 120;
+  const xs = Array.from({ length: n }, (_, i) => ((i * 37) % 101) * 10);
+  const ys = Array.from({ length: n }, (_, i) => ((i * 53) % 97) * 10);
+  const values = xs.map((x, i) => 0.002 * x + 0.01 * ys[i] + Math.sin(x / 150));
+  const variogram = {
+    variogramType: "exponential" as const,
+    nugget: 0.01,
+    sill: 4,
+    range: 600,
+  };
+  const target: [number, number] = [333, 444];
+
+  test("majorAngleDeg / rangeRatio default to isotropic", () => {
+    using implicit = new ProjectedKriging({ xs, ys, values, variogram });
+    using explicit = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      majorAngleDeg: 0,
+      rangeRatio: 1,
+    });
+    const a = implicit.predict(...target);
+    const b = explicit.predict(...target);
+    expect(a.value).toBe(b.value);
+    expect(a.variance).toBe(b.variance);
+  });
+
+  test("a neighborhood covering every station reproduces the full-data prediction", () => {
+    using full = new ProjectedKriging({ xs, ys, values, variogram });
+    using local = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      neighborhood: { maxNeighbors: n },
+    });
+    expect(full.neighborhood()).toBeNull();
+    expect(local.neighborhood()).toEqual({ maxNeighbors: n });
+    const a = full.predict(...target);
+    const b = local.predict(...target);
+    expect(b.value).toBeCloseTo(a.value, 3);
+    expect(b.variance).toBeCloseTo(a.variance, 3);
+  });
+
+  test("setNeighborhood narrows, clears, and validates", () => {
+    using model = new ProjectedKriging({
+      xs,
+      ys,
+      values,
+      variogram,
+      neighborhood: { maxNeighbors: 8 },
+    });
+    const narrow = model.predict(...target);
+    model.setNeighborhood({});
+    expect(model.neighborhood()).toBeNull();
+    using full = new ProjectedKriging({ xs, ys, values, variogram });
+    expect(model.predict(...target).value).toBeCloseTo(
+      full.predict(...target).value,
+      4
+    );
+    expect(narrow.value).not.toBeCloseTo(full.predict(...target).value, 6);
+    model.setNeighborhood({ maxNeighbors: 16, maxRadius: 400 });
+    expect(model.neighborhood()).toEqual({ maxNeighbors: 16, maxRadius: 400 });
+    expect(() => model.setNeighborhood({ maxNeighbors: 0 })).toThrow(
+      KrigingError
+    );
+    expect(() => model.setNeighborhood({ maxRadius: -1 })).toThrow(
+      KrigingError
+    );
+  });
+
+  test("a large dataset with a neighborhood builds and predicts", () => {
+    const big = 3000;
+    const bx = Array.from({ length: big }, (_, i) => ((i * 7919) % 1000) * 3.1);
+    const by = Array.from(
+      { length: big },
+      (_, i) => ((i * 104729) % 997) * 2.9
+    );
+    const bv = bx.map((x, i) => Math.sin(x / 400) + Math.cos(by[i] / 300));
+    using model = new ProjectedKriging({
+      xs: bx,
+      ys: by,
+      values: bv,
+      variogram,
+      neighborhood: { maxNeighbors: 24 },
+    });
+    const { values: out } = model.predictBatchArrays(
+      [10, 1500, 2900],
+      [10, 1400, 2800]
+    );
+    for (const v of out) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  test("fromFitted pipes a fitVariogramProjected result and honours nuggetOverride", () => {
+    const fitted = fitVariogramProjected({
+      xs,
+      ys,
+      values,
+      variogramType: "exponential",
+    });
+    using a = ProjectedKriging.fromFitted({
+      xs,
+      ys,
+      values,
+      fittedVariogram: fitted,
+    });
+    using b = new ProjectedKriging({ xs, ys, values, variogram: fitted });
+    expect(a.predict(...target).value).toBe(b.predict(...target).value);
+    using noisy = ProjectedKriging.fromFitted({
+      xs,
+      ys,
+      values,
+      fittedVariogram: fitted,
+      nuggetOverride: fitted.sill * 0.5,
+    });
+    expect(noisy.predict(...target).variance).toBeGreaterThan(
+      a.predict(...target).variance
+    );
+  });
+
+  test("predictGrid: cell centres, row 0 = south, matches predict", () => {
+    using model = new ProjectedKriging({ xs, ys, values, variogram });
+    const grid = model.predictGrid({
+      xMin: 0,
+      xMax: 1000,
+      yMin: 0,
+      yMax: 800,
+      xCells: 5,
+      yCells: 4,
+    });
+    expect(Array.from(grid.xCenters)).toEqual([100, 300, 500, 700, 900]);
+    expect(Array.from(grid.yCenters)).toEqual([100, 300, 500, 700]);
+    expect(grid.values.length).toBe(4);
+    expect(grid.values[0].length).toBe(5);
+    expect(grid.valuesFlat.length).toBe(20);
+    // Row-major, row 0 = yMin: cell (j = 2, i = 3) is at (700, 500).
+    expect(grid.valuesFlat[2 * 5 + 3]).toBe(grid.values[2][3]);
+    expect(grid.values[2][3]).toBeCloseTo(model.predict(700, 500).value, 6);
+    // The field rises northward, so the last row exceeds the first on average.
+    const mean = (row: number[]) => row.reduce((s, v) => s + v, 0) / row.length;
+    expect(mean(grid.values[3])).toBeGreaterThan(mean(grid.values[0]));
+    expect(() =>
+      model.predictGrid({
+        xMin: 5,
+        xMax: 5,
+        yMin: 0,
+        yMax: 1,
+        xCells: 2,
+        yCells: 2,
+      })
+    ).toThrow(KrigingError);
+  });
+});
+
+describe("3-D fitter names", () => {
+  test("fitSpherical3D* are aliases of the family-neutral fitVariogram3D* functions", () => {
+    expect(fitSpherical3DJoint).toBe(fitVariogram3DJoint);
+    expect(fitSpherical3DTwoStage).toBe(fitVariogram3DTwoStage);
+    expect(fitSpherical3DFixedNugget).toBe(fitVariogram3DFixedNugget);
+  });
+});
+
+describe("Cokriging", () => {
+  // Two correlated variables on a ~10 km lat/lon patch: z2 = 0.8 z1 + independent noise.
+  const n = 60;
+  const lats = Array.from(
+    { length: n },
+    (_, i) => 37.7 + ((i * 37) % 59) * 0.0015
+  );
+  const lons = Array.from(
+    { length: n },
+    (_, i) => -122.5 + ((i * 53) % 61) * 0.0015
+  );
+  const z1 = lats.map(
+    (lat, i) =>
+      10 +
+      3 * Math.sin((lat - 37.7) * 90) +
+      2 * Math.cos((lons[i] + 122.5) * 70)
+  );
+  const z2 = z1.map((v, i) => 0.8 * v + Math.sin(i * 1.7));
+  const variogram = {
+    variogramType: "spherical" as const,
+    nugget: 0,
+    sill: 4,
+    range: 6,
+  };
+  const targetLats = [37.73, 37.76, 37.79];
+  const targetLons = [-122.47, -122.45, -122.43];
+  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+
+  test("collocatedSecondaryFromPaired reproduces the sample moments", () => {
+    const sec = collocatedSecondaryFromPaired(z1, z2);
+    const m1 = mean(z1),
+      m2 = mean(z2);
+    const s1 = Math.sqrt(mean(z1.map((v) => (v - m1) ** 2)));
+    const s2 = Math.sqrt(mean(z2.map((v) => (v - m2) ** 2)));
+    const r = mean(z1.map((v, i) => (v - m1) * (z2[i] - m2))) / (s1 * s2);
+    expect(sec.mean).toBeCloseTo(m2, 3);
+    // The library reports the sample (n - 1) standard deviation.
+    expect(sec.stdDev).toBeCloseTo(s2 * Math.sqrt(n / (n - 1)), 3);
+    expect(sec.correlation).toBeCloseTo(r, 2);
+  });
+
+  test("collocated cokriging with zero correlation reduces to simple kriging", () => {
+    const primaryMean = mean(z1);
+    const out = cokrigeCollocated({
+      lats,
+      lons,
+      values: z1,
+      variogram,
+      primaryMean,
+      secondary: { mean: 0, stdDev: 1, correlation: 0 },
+      targetLats,
+      targetLons,
+      targetSecondaryValues: [5, -5, 0],
+    });
+    using sk = new SimpleKriging({
+      lats,
+      lons,
+      values: z1,
+      variogram,
+      mean: primaryMean,
+    });
+    out.forEach((p, i) => {
+      const ref = sk.predict(targetLats[i], targetLons[i]);
+      expect(p.value).toBeCloseTo(ref.value, 3);
+      expect(p.variance).toBeCloseTo(ref.variance, 3);
+    });
+  });
+
+  test("fitLmc output drives cokrige, which honours the data", () => {
+    const lmc = fitLmc({
+      lats,
+      lons,
+      variables: [z1, z2],
+      nBins: 10,
+      bases: [{ nugget: true }, { variogram }],
+    });
+    expect(lmc.coregionalization.structures).toHaveLength(2);
+    for (const s of lmc.coregionalization.structures) {
+      const [[a, b], [c, d]] = s.sills;
+      expect(b).toBeCloseTo(c, 6); // symmetric
+      expect(a * d - b * c).toBeGreaterThanOrEqual(-1e-6); // positive semidefinite
+    }
+    const preds = cokrige({
+      data: { lats, lons, variables: [z1, z2] },
+      coregionalization: lmc.coregionalization,
+      kind: { type: "ordinary" },
+      targetVariable: 0,
+      targetLats: [...targetLats, lats[7]],
+      targetLons: [...targetLons, lons[7]],
+    });
+    expect(preds).toHaveLength(4);
+    for (const p of preds) {
+      expect(Number.isFinite(p.value)).toBe(true);
+      expect(p.variance).toBeGreaterThanOrEqual(0);
+    }
+    expect(preds[3].value).toBeCloseTo(z1[7], 1);
+  });
+
+  test("computeCrossVariogram returns symmetric p×p matrices per lag", () => {
+    const cv = computeCrossVariogram({
+      lats,
+      lons,
+      variables: [z1, z2],
+      nBins: 8,
+    });
+    expect(cv.nVariables).toBe(2);
+    expect(cv.distances.length).toBe(cv.gamma.length);
+    for (const g of cv.gamma) {
+      expect(g).toHaveLength(4);
+      expect(g[1]).toBeCloseTo(g[2], 8);
+    }
+  });
+
+  test("collocatedCosimulate returns one realization per target, fixed by the seed", () => {
+    const opts = {
+      conditioningLats: lats,
+      conditioningLons: lons,
+      conditioningValues: z1,
+      targetLats,
+      targetLons,
+      targetSecondaryValues: [8, 9, 10],
+      variogram,
+      primaryMean: mean(z1),
+      secondary: collocatedSecondaryFromPaired(z1, z2),
+    };
+    const a = collocatedCosimulate({ ...opts, seed: 3 });
+    const b = collocatedCosimulate({ ...opts, seed: 3 });
+    expect(a).toHaveLength(3);
+    expect(Array.from(a)).toEqual(Array.from(b));
+    for (const v of a) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  test("cosimulateMultiVariable is deterministic per seed", () => {
+    const coregionalization = {
+      structures: [
+        {
+          basis: { variogram },
+          sills: [
+            [4, 3],
+            [3, 3.5],
+          ],
+        },
+      ],
+    };
+    const opts = {
+      data: { lats, lons, variables: [z1, z2] },
+      coregionalization,
+      means: [mean(z1), mean(z2)],
+      targetLats,
+      targetLons,
+    };
+    const a = cosimulateMultiVariable({ ...opts, seed: 11 });
+    const b = cosimulateMultiVariable({ ...opts, seed: 11 });
+    const c = cosimulateMultiVariable({ ...opts, seed: 12 });
+    expect(a.nVariables).toBe(2);
+    expect(a.nTargets).toBe(3);
+    expect(a.samples).toEqual(b.samples);
+    expect(a.samples).not.toEqual(c.samples);
   });
 });

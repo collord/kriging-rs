@@ -12,6 +12,11 @@ streaming realization API. The 2-D path is unchanged. See the
 
 [Documentation](https://docs.rs/kriging-rs)
 
+**In the browser:** the [`kriging-rs-wasm`](npm/kriging-rs-wasm) npm package exposes this
+crate to TypeScript. [`examples/web-2d`](examples/web-2d) is a typed starter app (variogram
+fit, kriging in a Web Worker, north-up map) to build from. Contributors and coding agents:
+start with [AGENTS.md](AGENTS.md).
+
 ## 3-D quick example
 
 ```rust
@@ -260,10 +265,13 @@ keeps them parallel for review/PR simplicity.
 
 **Conventions worth knowing**:
 
-- 3-D kriging variance follows upstream's "latent field" convention:
-  `σ² = C(0) − λ·k₀ − μ` where `C(0)` is the partial sill (without
-  the nugget). Add the nugget back to recover textbook "standard"
-  kriging variance.
+- Kriging variance (2-D and 3-D) is the standard textbook
+  `σ² = C(0) − λ·k₀ − μ` with `C(0)` the total sill, nugget included.
+  `γ(0) = 0` by definition; the nugget is the jump just past the
+  origin, so it sits on the kriging-matrix diagonal and raises the
+  variance as it grows. (Releases up to 0.4 dropped the nugget from the
+  diagonal, which understated variance and made the nugget have
+  almost no effect on the estimates.)
 - The robust 3-D solver uses regular Cholesky on the n×n covariance
   block (not LU like upstream's 2-D) with nugget-inflation retry on
   factorization failure. Pivoted Cholesky was specified in v3 but

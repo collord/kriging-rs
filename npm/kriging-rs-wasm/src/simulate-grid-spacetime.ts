@@ -250,7 +250,9 @@ export function simulateBinomialSpaceTimeGridSummary(
 // Date-aware variants
 // -----------------------------------------------------------------------------
 
-function adaptDateOptions<T extends DateAxisOptions>(opts: T): {
+function adaptDateOptions<T extends DateAxisOptions>(
+  opts: T
+): {
   times: Float64Array;
   time: number;
 } {

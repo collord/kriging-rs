@@ -169,8 +169,7 @@ export interface DateAxisOptions {
  * configuration.
  */
 export interface PredictGridAtDateOptions
-  extends PredictGridOptions,
-    DateAxisOptions {
+  extends PredictGridOptions, DateAxisOptions {
   /** Date at which to evaluate every grid cell. */
   date: Date;
 }
@@ -368,8 +367,7 @@ export interface BinomialGridEnsemble extends GeoGridBounds {
  * scale by default (the natural reporting scale for disease maps); set
  * `summarizeOn: "logit"` to report on the logit scale instead.
  */
-export interface SimulateBinomialGridSummaryOptions
-  extends SimulateBinomialGridEnsembleOptions {
+export interface SimulateBinomialGridSummaryOptions extends SimulateBinomialGridEnsembleOptions {
   /**
    * Probabilities in `[0, 1]` to report (e.g. `[0.025, 0.5, 0.975]` for a 95% CI
    * around the median). Pass an empty list to skip quantile computation.
@@ -418,8 +416,10 @@ export interface SimulateBinomialSpaceTimeGridOptions extends GeoGridBounds {
  * flat row-major ensemble buffers (same layout as
  * {@link BinomialSimulationManyResult}).
  */
-export interface SimulateBinomialSpaceTimeGridEnsembleOptions
-  extends Omit<SimulateBinomialSpaceTimeGridOptions, "seed"> {
+export interface SimulateBinomialSpaceTimeGridEnsembleOptions extends Omit<
+  SimulateBinomialSpaceTimeGridOptions,
+  "seed"
+> {
   nRealizations: number;
   /** Base seed; the k-th realization uses `baseSeed + k`. */
   baseSeed?: number | bigint;
@@ -430,8 +430,7 @@ export interface SimulateBinomialSpaceTimeGridEnsembleOptions
  * a fixed `time` and reduce it to per-cell summary maps in one call. Mirrors
  * {@link SimulateBinomialGridSummaryOptions}.
  */
-export interface SimulateBinomialSpaceTimeGridSummaryOptions
-  extends SimulateBinomialSpaceTimeGridEnsembleOptions {
+export interface SimulateBinomialSpaceTimeGridSummaryOptions extends SimulateBinomialSpaceTimeGridEnsembleOptions {
   quantiles?: ReadonlyArray<number>;
   exceedanceThresholds?: ReadonlyArray<number>;
   summarizeOn?: "prevalence" | "logit";
@@ -444,8 +443,7 @@ export interface SimulateBinomialSpaceTimeGridSummaryOptions
  * model's numeric time axis.
  */
 export interface SimulateBinomialSpaceTimeGridAtDateOptions
-  extends GeoGridBounds,
-    DateAxisOptions {
+  extends GeoGridBounds, DateAxisOptions {
   lats: NumericArrayInput;
   lons: NumericArrayInput;
   /** Conditioning station dates. */
@@ -460,15 +458,16 @@ export interface SimulateBinomialSpaceTimeGridAtDateOptions
 }
 
 /** Date-aware variant of {@link SimulateBinomialSpaceTimeGridEnsembleOptions}. */
-export interface SimulateBinomialSpaceTimeGridEnsembleAtDateOptions
-  extends Omit<SimulateBinomialSpaceTimeGridAtDateOptions, "seed"> {
+export interface SimulateBinomialSpaceTimeGridEnsembleAtDateOptions extends Omit<
+  SimulateBinomialSpaceTimeGridAtDateOptions,
+  "seed"
+> {
   nRealizations: number;
   baseSeed?: number | bigint;
 }
 
 /** Date-aware variant of {@link SimulateBinomialSpaceTimeGridSummaryOptions}. */
-export interface SimulateBinomialSpaceTimeGridSummaryAtDateOptions
-  extends SimulateBinomialSpaceTimeGridEnsembleAtDateOptions {
+export interface SimulateBinomialSpaceTimeGridSummaryAtDateOptions extends SimulateBinomialSpaceTimeGridEnsembleAtDateOptions {
   quantiles?: ReadonlyArray<number>;
   exceedanceThresholds?: ReadonlyArray<number>;
   summarizeOn?: "prevalence" | "logit";
@@ -635,6 +634,28 @@ export interface FitVariogramOptions {
 }
 
 /**
+ * Options for {@link fitVariogramProjected}: the planar `(x, y)` counterpart of
+ * {@link FitVariogramOptions}. Distances are Euclidean in the coordinates' units, so the
+ * fitted `range` (and `maxDistance`) are in those units too.
+ */
+export interface FitVariogramProjectedOptions {
+  /** Sample x coordinates (e.g. easting in metres). */
+  xs: NumericArrayInput;
+  /** Sample y coordinates (e.g. northing in metres). */
+  ys: NumericArrayInput;
+  /** Sample values (same length as `xs`/`ys`). */
+  values: NumericArrayInput;
+  /** Variogram model type: string (e.g. `"exponential"`) or {@link VariogramType} enum value. */
+  variogramType: VariogramTypeName | number;
+  /** Maximum pair separation to bin, in coordinate units; omit to use the largest separation. */
+  maxDistance?: number;
+  /** Number of distance bins for the empirical variogram (default 12). */
+  nBins?: number;
+  /** Empirical estimator: `"classical"` (default) or `"cressie-hawkins"` (robust). */
+  estimator?: EmpiricalEstimator;
+}
+
+/**
  * Variogram parameters for model construction (nugget, sill, range, optional shape).
  */
 export interface VariogramParams {
@@ -722,7 +743,10 @@ export interface BinomialKrigingWithPriorOptions {
 export interface NeighborhoodOptions {
   /** Keep only the `k` closest stations at each prediction location. */
   maxNeighbors?: number;
-  /** Keep only stations within this great-circle distance (kilometers). */
+  /**
+   * Keep only stations within this distance: great-circle kilometres for lat/lon models,
+   * coordinate units (anisotropic distance) for {@link ProjectedKriging}.
+   */
   maxRadius?: number;
 }
 
@@ -762,11 +786,69 @@ export interface ProjectedKrigingOptions {
   xs: NumericArrayInput;
   ys: NumericArrayInput;
   values: NumericArrayInput;
+  /** Variogram whose `range` is in the coordinates' units (e.g. from {@link fitVariogramProjected}). */
   variogram: VariogramParams;
-  /** Azimuth of the major axis, in degrees counter-clockwise from +x. */
-  majorAngleDeg: number;
-  /** Ratio of minor to major range, in `(0, 1]`. */
-  rangeRatio: number;
+  /** Azimuth of the major axis, in degrees counter-clockwise from +x. Default `0`. */
+  majorAngleDeg?: number;
+  /** Ratio of minor to major range, in `(0, 1]`. Default `1` (isotropic). */
+  rangeRatio?: number;
+  /**
+   * Search neighborhood (`maxRadius` in coordinate units). When set, the model never
+   * factorizes the full `n × n` system, so construction is `O(n)` and each prediction
+   * solves a small local system. Use it beyond a few hundred stations.
+   */
+  neighborhood?: NeighborhoodOptions;
+}
+
+/**
+ * Options for {@link ProjectedKriging.fromFitted}: planar data plus a fitted variogram
+ * (typically from {@link fitVariogramProjected}).
+ */
+export interface ProjectedKrigingFromFittedOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  values: NumericArrayInput;
+  fittedVariogram: FittedVariogram;
+  /** If set, overrides the fitted nugget. */
+  nuggetOverride?: number;
+  /** Azimuth of the major axis, in degrees counter-clockwise from +x. Default `0`. */
+  majorAngleDeg?: number;
+  /** Ratio of minor to major range, in `(0, 1]`. Default `1` (isotropic). */
+  rangeRatio?: number;
+  /** Search neighborhood; see {@link ProjectedKrigingOptions.neighborhood}. */
+  neighborhood?: NeighborhoodOptions;
+}
+
+/**
+ * A regular planar grid for {@link ProjectedKriging.predictGrid}: `xCells × yCells` cells
+ * covering `[xMin, xMax] × [yMin, yMax]`, predicted at cell centres.
+ */
+export interface PredictGridProjectedOptions {
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  /** Number of columns (x direction). */
+  xCells: number;
+  /** Number of rows (y direction). */
+  yCells: number;
+}
+
+/**
+ * Output of {@link ProjectedKriging.predictGrid}. Row `j = 0` is the **southern** row
+ * (`yMin`) and column `i = 0` the western one (`xMin`), the same convention as
+ * {@link OrdinaryKriging.predictGrid}. To draw north-up (canvas row 0 at the top), read
+ * row `yCells - 1 - r` for screen row `r`.
+ */
+export interface ProjectedGridOutput extends OrdinaryGridOutput {
+  /** `values` as one row-major array: `valuesFlat[j * xCells + i]`. */
+  valuesFlat: Float64Array;
+  /** `variances` as one row-major array, same layout as `valuesFlat`. */
+  variancesFlat: Float64Array;
+  /** Cell-centre x of each column (length `xCells`, west to east). */
+  xCenters: Float64Array;
+  /** Cell-centre y of each row (length `yCells`, south to north). */
+  yCenters: Float64Array;
 }
 
 /**
@@ -798,8 +880,7 @@ export interface BinomialProjectedKrigingOptions {
 }
 
 /** Options for {@link BinomialProjectedKriging.newWithPrior}. */
-export interface BinomialProjectedKrigingWithPriorOptions
-  extends BinomialProjectedKrigingOptions {
+export interface BinomialProjectedKrigingWithPriorOptions extends BinomialProjectedKrigingOptions {
   prior: BinomialPriorParams;
 }
 
@@ -837,6 +918,22 @@ export interface ComputeEmpiricalVariogramOptions {
   /** Optional maximum distance for binning; omit for automatic choice. */
   maxDistance?: number;
   /** Number of distance bins for the empirical variogram (default 12). */
+  nBins?: number;
+  /** Estimator choice; defaults to `"classical"`. */
+  estimator?: EmpiricalEstimator;
+}
+
+/**
+ * Options for {@link computeEmpiricalVariogramProjected}: the planar `(x, y)` counterpart of
+ * {@link ComputeEmpiricalVariogramOptions} (Euclidean distances in coordinate units).
+ */
+export interface ComputeEmpiricalVariogramProjectedOptions {
+  xs: NumericArrayInput;
+  ys: NumericArrayInput;
+  values: NumericArrayInput;
+  /** Maximum pair separation to bin, in coordinate units; omit to use the largest separation. */
+  maxDistance?: number;
+  /** Number of distance bins (default 12). */
   nBins?: number;
   /** Estimator choice; defaults to `"classical"`. */
   estimator?: EmpiricalEstimator;
@@ -1015,8 +1112,7 @@ export interface LeaveOneOutBinomialProjectedOptions {
 }
 
 /** Options for {@link kFoldBinomialProjected}. */
-export interface KFoldBinomialProjectedOptions
-  extends LeaveOneOutBinomialProjectedOptions {
+export interface KFoldBinomialProjectedOptions extends LeaveOneOutBinomialProjectedOptions {
   /** Number of folds, must satisfy `2 ≤ k ≤ n`. */
   k: number;
 }
@@ -1115,8 +1211,10 @@ export interface ConditionalSimulateOptions {
  * realization is drawn with `baseSeed + BigInt(k)` so every draw is independent yet
  * deterministic.
  */
-export interface ConditionalSimulateManyOptions
-  extends Omit<ConditionalSimulateOptions, "seed"> {
+export interface ConditionalSimulateManyOptions extends Omit<
+  ConditionalSimulateOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1211,8 +1309,10 @@ export interface BinomialSimulationResult {
  * the k-th row of the result is bit-identical to a single
  * {@link conditionalSimulateBinomial} call with that seed.
  */
-export interface ConditionalSimulateManyBinomialOptions
-  extends Omit<ConditionalSimulateBinomialOptions, "seed"> {
+export interface ConditionalSimulateManyBinomialOptions extends Omit<
+  ConditionalSimulateBinomialOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1249,8 +1349,10 @@ export interface ConditionalSimulateBinomialProjectedOptions {
  * {@link ConditionalSimulateBinomialProjectedOptions} but with `nRealizations`
  * and `baseSeed` instead of `seed`.
  */
-export interface ConditionalSimulateManyBinomialProjectedOptions
-  extends Omit<ConditionalSimulateBinomialProjectedOptions, "seed"> {
+export interface ConditionalSimulateManyBinomialProjectedOptions extends Omit<
+  ConditionalSimulateBinomialProjectedOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1262,8 +1364,10 @@ export interface ConditionalSimulateManyBinomialProjectedOptions
  * {@link ConditionalSimulateSpaceTimeBinomialOptions} but with `nRealizations` and
  * `baseSeed` instead of `seed`.
  */
-export interface ConditionalSimulateManySpaceTimeBinomialOptions
-  extends Omit<ConditionalSimulateSpaceTimeBinomialOptions, "seed"> {
+export interface ConditionalSimulateManySpaceTimeBinomialOptions extends Omit<
+  ConditionalSimulateSpaceTimeBinomialOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. */
@@ -1488,14 +1592,12 @@ export interface SpaceTimeOrdinaryKrigingFromFittedOptions {
 }
 
 /** Options for {@link SpaceTimeSimpleKriging.fromFitted}. */
-export interface SpaceTimeSimpleKrigingFromFittedOptions
-  extends SpaceTimeOrdinaryKrigingFromFittedOptions {
+export interface SpaceTimeSimpleKrigingFromFittedOptions extends SpaceTimeOrdinaryKrigingFromFittedOptions {
   mean: number;
 }
 
 /** Options for {@link SpaceTimeUniversalKriging.fromFitted}. */
-export interface SpaceTimeUniversalKrigingFromFittedOptions
-  extends SpaceTimeOrdinaryKrigingFromFittedOptions {
+export interface SpaceTimeUniversalKrigingFromFittedOptions extends SpaceTimeOrdinaryKrigingFromFittedOptions {
   trend: SpaceTimeUniversalTrend;
 }
 
@@ -1691,8 +1793,10 @@ export interface ConditionalSimulateSpaceTimeOptions {
  * Options for {@link conditionalSimulateManySpaceTime}. Mirrors
  * {@link ConditionalSimulateManyOptions} for the space-time ordinary variant.
  */
-export interface ConditionalSimulateManySpaceTimeOptions
-  extends Omit<ConditionalSimulateSpaceTimeOptions, "seed"> {
+export interface ConditionalSimulateManySpaceTimeOptions extends Omit<
+  ConditionalSimulateSpaceTimeOptions,
+  "seed"
+> {
   /** Number of independent realizations to draw (must be >= 1). */
   nRealizations: number;
   /** Seed for the first realization. Successive realizations use `baseSeed + k`. */
@@ -1904,8 +2008,9 @@ export interface AxisVariogramInput {
 }
 
 /**
- * Options for {@link fitSpherical3DJoint}: three axis-aligned experimental
- * variograms fitted jointly to one anisotropic spherical model.
+ * Options for {@link fitVariogram3DJoint}: three axis-aligned experimental
+ * variograms fitted jointly to one anisotropic model of `variogramType`
+ * (default spherical).
  */
 export interface FitSpherical3DOptions {
   major: AxisVariogramInput;
@@ -1924,7 +2029,7 @@ export interface FitSpherical3DOptions {
 }
 
 /**
- * Options for {@link fitSpherical3DTwoStage}. Stage 1 fits nugget, sill, and
+ * Options for {@link fitVariogram3DTwoStage}. Stage 1 fits nugget, sill, and
  * vertical range on the vertical experimental alone; stage 2 holds those and
  * fits the horizontal ranges.
  */
@@ -1938,19 +2043,19 @@ export interface FitSpherical3DTwoStageOptions extends FitSpherical3DOptions {
 }
 
 /**
- * Options for {@link fitSpherical3DFixedNugget}: refit with the nugget held at
+ * Options for {@link fitVariogram3DFixedNugget}: refit with the nugget held at
  * a user-supplied value (e.g. read off the vertical's short-lag intercept).
  */
-export interface FitSpherical3DFixedNuggetOptions
-  extends FitSpherical3DOptions {
+export interface FitSpherical3DFixedNuggetOptions extends FitSpherical3DOptions {
   /** Nugget value to hold fixed during the fit. */
   nugget: number;
 }
 
 /**
- * A fitted 3-D anisotropic spherical variogram: one nugget and sill with
- * per-axis ranges. Drives 3-D kriging via {@link Anisotropy3DParams} (range
- * ratios) plus a spherical {@link VariogramParams} with `range: rangeMajor`.
+ * A fitted 3-D anisotropic variogram (of the family in `variogramType`): one
+ * nugget and sill with per-axis ranges. Drives 3-D kriging via
+ * {@link Anisotropy3DParams} (range ratios) plus a {@link VariogramParams} of the
+ * same family with `range: rangeMajor`. The name predates non-spherical fits.
  */
 export interface FittedSpherical3D {
   nugget: number;

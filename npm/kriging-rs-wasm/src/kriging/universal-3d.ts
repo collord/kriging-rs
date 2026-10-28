@@ -7,10 +7,7 @@
 
 import { KrigingError, wrapThrown } from "../errors.js";
 import { toFloat64Array } from "../internal/convert.js";
-import {
-  mapBatch3DArrayOutput,
-  mapPrediction3D,
-} from "../internal/mappers.js";
+import { mapBatch3DArrayOutput, mapPrediction3D } from "../internal/mappers.js";
 import { requireLoadedModule } from "../internal/module.js";
 import { anisotropyOrIdentity } from "../internal/three-d.js";
 import type { WasmKriging3DInstance } from "../internal/wasm-shapes.js";

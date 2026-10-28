@@ -35,13 +35,18 @@ export {
   fitSpherical3DFixedNugget,
   fitSpherical3DJoint,
   fitSpherical3DTwoStage,
+  fitVariogram3DFixedNugget,
+  fitVariogram3DJoint,
+  fitVariogram3DTwoStage,
 } from "./variogram-3d.js";
 export { gaussianSimulation3D } from "./simulate-3d.js";
 export {
   computeDirectionalEmpiricalVariogram,
   computeEmpiricalVariogram,
+  computeEmpiricalVariogramProjected,
   evaluateNestedVariogram,
   fitVariogram,
+  fitVariogramProjected,
 } from "./variogram.js";
 export {
   kFold,
@@ -177,6 +182,7 @@ export type {
   BinomialSimulationResult,
   ComputeDirectionalEmpiricalVariogramOptions,
   ComputeEmpiricalVariogramOptions,
+  ComputeEmpiricalVariogramProjectedOptions,
   ConditionalSimulateBinomialOptions,
   ConditionalSimulateBinomialProjectedOptions,
   ConditionalSimulateManyBinomialOptions,
@@ -205,6 +211,7 @@ export type {
   FitSpherical3DOptions,
   FitSpherical3DTwoStageOptions,
   FitVariogramOptions,
+  FitVariogramProjectedOptions,
   FittedSpherical1D,
   FittedSpherical3D,
   FittedVariogram,
@@ -255,6 +262,9 @@ export type {
   PredictGridAtDateOptions,
   PredictGridAtTimeOptions,
   PredictGridOptions,
+  PredictGridProjectedOptions,
+  ProjectedGridOutput,
+  ProjectedKrigingFromFittedOptions,
   ProjectedKrigingOptions,
   Realization3DCallback,
   SimpleKriging3DOptions,

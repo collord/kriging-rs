@@ -15,9 +15,7 @@ import {
   mapBinomialPredictionArray,
 } from "../internal/mappers.js";
 import { requireLoadedModule } from "../internal/module.js";
-import {
-  fittedToSpaceTimeVariogramParams,
-} from "../internal/spacetime.js";
+import { fittedToSpaceTimeVariogramParams } from "../internal/spacetime.js";
 import { timesFromDates } from "../time.js";
 import type { WasmSpaceTimeBinomialInstance } from "../internal/wasm-shapes.js";
 import type {

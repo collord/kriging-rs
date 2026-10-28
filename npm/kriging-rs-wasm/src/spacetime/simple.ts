@@ -11,9 +11,7 @@ import {
   mapOrdinaryPrediction,
 } from "../internal/mappers.js";
 import { requireLoadedModule } from "../internal/module.js";
-import {
-  fittedToSpaceTimeVariogramParams,
-} from "../internal/spacetime.js";
+import { fittedToSpaceTimeVariogramParams } from "../internal/spacetime.js";
 import type { WasmSpaceTimeInstance } from "../internal/wasm-shapes.js";
 import type {
   NumericArrayInput,

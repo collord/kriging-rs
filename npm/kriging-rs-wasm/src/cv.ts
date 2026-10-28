@@ -24,9 +24,7 @@ import { toFloat64Array, toUint32Array } from "./internal/convert.js";
 import { mapBinomialCvOutput, mapCvOutput } from "./internal/mappers.js";
 import { requireLoadedModule } from "./internal/module.js";
 import { resolveBinomialPrior } from "./internal/prior.js";
-import {
-  requireSpaceTimeUniversalTrend,
-} from "./internal/spacetime.js";
+import { requireSpaceTimeUniversalTrend } from "./internal/spacetime.js";
 import type {
   BinomialCvResult,
   CvResult,

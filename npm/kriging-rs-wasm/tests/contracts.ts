@@ -419,20 +419,21 @@ const _stSgsBin: BinomialSimulationResult =
     seed: 1n,
   });
 
-const _oneShotBinomial: InterpolateBinomialToGridResult = interpolateBinomialToGrid({
-  lats: Array.from(lats),
-  lons: Array.from(lons),
-  successes: Array.from(successes),
-  trials: Array.from(trials),
-  west: 0,
-  south: 0,
-  east: 2,
-  north: 2,
-  xCells: 3,
-  yCells: 3,
-  variogramType: "exponential",
-  prior: { alpha: 1, beta: 1 },
-});
+const _oneShotBinomial: InterpolateBinomialToGridResult =
+  interpolateBinomialToGrid({
+    lats: Array.from(lats),
+    lons: Array.from(lons),
+    successes: Array.from(successes),
+    trials: Array.from(trials),
+    west: 0,
+    south: 0,
+    east: 2,
+    north: 2,
+    xCells: 3,
+    yCells: 3,
+    variogramType: "exponential",
+    prior: { alpha: 1, beta: 1 },
+  });
 
 // ---------- SpaceTimeVariogramParams discriminated-union contracts ----------
 

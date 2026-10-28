@@ -52,7 +52,7 @@ fn assert_model_sensible(fit: &FitResult) {
     assert!(nugget >= 0.0, "nugget must be non-negative");
     assert!(sill > nugget, "sill must exceed nugget");
     assert!(range > 0.0, "range must be positive");
-    // gamma at lag 0 is the nugget; at large lag approaches sill.
+    // gamma at lag 0 is exactly 0 (the nugget is the jump just past the origin).
     let g_zero = fit.model.semivariance(0.0);
     let g_large = fit.model.semivariance(range * 10.0);
     assert!(

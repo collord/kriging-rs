@@ -790,7 +790,8 @@ pub fn fit_spherical_3d_two_stage(
     // Recompute stage 1's residuals from the final parameters so the
     // returned value covers both the anchored-2D and unanchored-3D
     // branches uniformly.
-    let stage1_residuals = axis_residuals(&form, vertical, nugget_fit, sill_fit, range_vertical_fit);
+    let stage1_residuals =
+        axis_residuals(&form, vertical, nugget_fit, sill_fit, range_vertical_fit);
     Ok(form.fit(
         nugget_fit,
         sill_fit,
@@ -875,14 +876,7 @@ pub fn fit_spherical_3d_with_fixed_nugget(
             "fixed-nugget fit did not converge".to_string(),
         ));
     }
-    Ok(form.fit(
-        nugget,
-        best.0[0],
-        best.0[1],
-        best.0[2],
-        best.0[3],
-        best.1,
-    ))
+    Ok(form.fit(nugget, best.0[0], best.0[1], best.0[2], best.0[3], best.1))
 }
 
 // -----------------------------------------------------------------------------
@@ -1317,7 +1311,8 @@ mod tests {
         let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
         let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
 
-        let fit = fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
+        let fit =
+            fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, truth.0 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
@@ -1337,7 +1332,8 @@ mod tests {
         let minor = synth_spherical(&lags_minor, nugget, sill, 25.0);
         let vertical = synth_spherical(&lags_vertical, nugget, sill, 8.0);
 
-        let fit = fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
+        let fit =
+            fit_spherical_3d_joint(ModelForm::spherical(), &major, &minor, &vertical).unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, nugget as f64, epsilon = 5e-2);
         approx::assert_relative_eq!(fit.sill as f64, sill as f64, epsilon = 5e-2);
         approx::assert_relative_eq!(fit.range_major as f64, 40.0, epsilon = 2.0);
@@ -1356,7 +1352,15 @@ mod tests {
         let lags_minor: Vec<Real> = (1..=12).map(|i| i as Real * 3.0).collect();
         let lags_vertical: Vec<Real> = (1..=12).map(|i| i as Real * 2.0).collect();
         let g = |lags: &[Real], range: Real| {
-            synth_axis(VariogramType::Gaussian, None, None, lags, nugget, sill, range)
+            synth_axis(
+                VariogramType::Gaussian,
+                None,
+                None,
+                lags,
+                nugget,
+                sill,
+                range,
+            )
         };
         let major = g(&lags_major, 40.0);
         let minor = g(&lags_minor, 25.0);
@@ -1389,7 +1393,9 @@ mod tests {
 
         // Pass the true variance as the sill anchor so the test
         // exercises the anchored path (the common case from JS).
-        let fit = fit_spherical_3d_two_stage(ModelForm::spherical(), &major, &minor, &vertical, truth.1).unwrap();
+        let fit =
+            fit_spherical_3d_two_stage(ModelForm::spherical(), &major, &minor, &vertical, truth.1)
+                .unwrap();
         approx::assert_relative_eq!(fit.nugget as f64, truth.0 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.sill as f64, truth.1 as f64, epsilon = 1e-2);
         approx::assert_relative_eq!(fit.range_major as f64, truth.2 as f64, epsilon = 1.0);
@@ -1435,8 +1441,14 @@ mod tests {
         horizontal.semivariances.insert(0, 0.04);
         horizontal.n_pairs.insert(0, 5);
 
-        let two_stage =
-            fit_spherical_3d_two_stage(ModelForm::spherical(), &horizontal, &horizontal, &vertical, sill).unwrap();
+        let two_stage = fit_spherical_3d_two_stage(
+            ModelForm::spherical(),
+            &horizontal,
+            &horizontal,
+            &vertical,
+            sill,
+        )
+        .unwrap();
         // Two-stage's nugget comes from vertical alone, so it should
         // land near the truth.
         approx::assert_relative_eq!(two_stage.nugget as f64, nugget as f64, epsilon = 5e-2);
@@ -1444,7 +1456,9 @@ mod tests {
         // Joint fit gets pulled toward zero by the noisy small-lag
         // bins. This snapshot documents the problem two-stage solves;
         // remove the assertion if the joint fit gets smarter.
-        let joint = fit_spherical_3d_joint(ModelForm::spherical(), &horizontal, &horizontal, &vertical).unwrap();
+        let joint =
+            fit_spherical_3d_joint(ModelForm::spherical(), &horizontal, &horizontal, &vertical)
+                .unwrap();
         assert!(
             joint.nugget < nugget * 0.5,
             "expected joint fit to underestimate nugget on noisy small-lag bins (got {} vs true {})",
@@ -1464,7 +1478,14 @@ mod tests {
         let minor = synth_spherical(&lags, truth.0, truth.1, truth.2);
         let vertical = synth_spherical(&lags, truth.0, truth.1, truth.2);
 
-        let fit = fit_spherical_3d_with_fixed_nugget(ModelForm::spherical(), &major, &minor, &vertical, 0.3).unwrap();
+        let fit = fit_spherical_3d_with_fixed_nugget(
+            ModelForm::spherical(),
+            &major,
+            &minor,
+            &vertical,
+            0.3,
+        )
+        .unwrap();
         // f32 precision: the constant 0.3 cast to f32 is not exactly 0.3;
         // allow ulp-scale jitter.
         approx::assert_relative_eq!(fit.nugget as f64, 0.3, epsilon = 1e-6);
@@ -1481,9 +1502,15 @@ mod tests {
             semivariances: vec![],
             n_pairs: vec![],
         };
-        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &empty, &nonempty, &nonempty).is_err());
-        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &empty, &nonempty).is_err());
-        assert!(fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &nonempty, &empty).is_err());
+        assert!(
+            fit_spherical_3d_joint(ModelForm::spherical(), &empty, &nonempty, &nonempty).is_err()
+        );
+        assert!(
+            fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &empty, &nonempty).is_err()
+        );
+        assert!(
+            fit_spherical_3d_joint(ModelForm::spherical(), &nonempty, &nonempty, &empty).is_err()
+        );
     }
 
     #[test]

@@ -21,8 +21,8 @@ System: `(n+4) × (n+4)` bordered by the trend basis:
 - `F[i, :] = [1, x_i, y_i, z_i]` for the linear basis.
 - `f₀ = [1, x_target, y_target, z_target]`.
 - Predicted: `λᵀ z`.
-- Variance (standard, semivariance form): `λᵀ γ₀ + μᵀ f₀`.
-- Variance (latent, our convention): standard − nugget.
+- `Γ[i, i] = γ(0) = 0`; the nugget enters every off-diagonal and `γ₀` entry.
+- Variance (standard, semivariance form, nugget included): `λᵀ γ₀ + μᵀ f₀`.
 
 The 4 Lagrangian rows enforce trend unbiasedness on the kriging
 weights (one constraint per basis function): `Σ λᵢ f_k(xᵢ) = f_k(x₀)`
@@ -34,19 +34,20 @@ for each `k`.
 - `targets.csv` — 1000 random `(x, y, z)` from
   `numpy.random.default_rng(20260527)`.
 - `predictions.csv` — `(x, y, z, value, variance)` from the textbook
-  UK reference.
+  UK reference, using all 150 samples.
 
 ## Tolerance
 
-2e-2 relative on both value and variance. UK has structurally more
-drift than OK because it adds 4 Lagrangians plus a 4×4 trend system
-on top of the same Cholesky path; the extra back-substitutions
-accumulate slightly more rounding. Measured ~1.5e-2 in practice with
-2e-2 leaving a small safety margin.
+Both sides solve the same equations, so they differ only by rounding:
+measured maximum relative error is ~6e-7 with `f32` storage and ~5e-15
+with `f64`. The test uses 1e-5 and 1e-10 respectively.
 
 ## Generation
 
 ```bash
-cd /Users/collord/rust-geostats-work/geostatspy-vendor
-.venv/bin/python generate_uk3d_reference.py
+python tests/parity_3d/fixtures/generate_textbook_kriging.py
 ```
+
+Regenerates the OK, SK and UK fixtures together; see
+[`../textbook_ok3d/README.md`](../textbook_ok3d/README.md#nugget-and-variance-convention) for why
+the original fixture was replaced.

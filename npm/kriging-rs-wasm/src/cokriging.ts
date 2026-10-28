@@ -269,7 +269,8 @@ export function fitLmc(options: FitLmcOptions): LmcFitResult {
     });
     const rec = asRecord(out);
     return {
-      coregionalization: rec.coregionalization as LmcFitResult["coregionalization"],
+      coregionalization:
+        rec.coregionalization as LmcFitResult["coregionalization"],
       residual: requireNumber(rec.residual),
       iterations: requireNumber(rec.iterations),
     };

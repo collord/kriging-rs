@@ -15,19 +15,21 @@ describe("time helpers", () => {
   });
 
   test("timesFromDates supports every TimeUnit", () => {
-    expect(timesFromDates([jan1, feb1], "ms")[1] - timesFromDates([jan1, feb1], "ms")[0]).toBe(
-      31 * 86_400_000,
-    );
-    expect(timesFromDates([jan1, feb1], "s")[1] - timesFromDates([jan1, feb1], "s")[0]).toBe(
-      31 * 86_400,
-    );
+    expect(
+      timesFromDates([jan1, feb1], "ms")[1] -
+        timesFromDates([jan1, feb1], "ms")[0]
+    ).toBe(31 * 86_400_000);
+    expect(
+      timesFromDates([jan1, feb1], "s")[1] -
+        timesFromDates([jan1, feb1], "s")[0]
+    ).toBe(31 * 86_400);
     expect(
       timesFromDates([jan1, feb1Plus5Min], "minutes")[1] -
-        timesFromDates([jan1, feb1Plus5Min], "minutes")[0],
+        timesFromDates([jan1, feb1Plus5Min], "minutes")[0]
     ).toBe(31 * 24 * 60 + 5);
     expect(
       timesFromDates([jan1, feb1Plus5Min], "hours")[1] -
-        timesFromDates([jan1, feb1Plus5Min], "hours")[0],
+        timesFromDates([jan1, feb1Plus5Min], "hours")[0]
     ).toBeCloseTo(31 * 24 + 5 / 60, 10);
   });
 
@@ -53,7 +55,7 @@ describe("time helpers", () => {
     const fromArray = datesFromTimes([0, 1], "days");
     const fromTyped = datesFromTimes(new Float64Array([0, 1]), "days");
     expect(fromArray.map((d) => d.getTime())).toEqual(
-      fromTyped.map((d) => d.getTime()),
+      fromTyped.map((d) => d.getTime())
     );
   });
 });

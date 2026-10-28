@@ -21,3 +21,4 @@ docs/pdf/
 
 *.tgz
 www/dist
+examples/web-2d/dist

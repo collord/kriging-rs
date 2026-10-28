@@ -39,20 +39,64 @@ use crate::variogram::empirical::{EmpiricalEstimator, PositiveReal};
 
 // ---------- shared helpers ----------
 
-/// Build a `Vec<Coord3D>` from parallel `xs/ys/zs` typed-array slices.
-fn to_coords_3d(xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<Vec<Coord3D>, JsValue> {
-    if xs.len() != ys.len() || xs.len() != zs.len() {
-        return Err(coded_err(
-            "xs, ys, zs must have the same length",
-            "mismatched_arrays",
-        ));
+/// Origin shift for `(x, y, z)` input, applied in `f64` before narrowing to [`Real`] —
+/// the 3-D counterpart of [`PlanarOrigin`](super::PlanarOrigin). Kriging, variograms and
+/// simulation depend only on coordinate differences (the linear 3-D trend spans the same
+/// space after a shift), so centring on the data changes no result but keeps `f32` builds
+/// accurate for large mine-grid or UTM coordinates.
+#[derive(Debug, Clone, Copy, Default)]
+struct Origin3D {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+impl Origin3D {
+    /// Centroid of the finite points (the origin when there are none).
+    fn centroid(xs: &[f64], ys: &[f64], zs: &[f64]) -> Self {
+        let (mut sx, mut sy, mut sz, mut n) = (0.0, 0.0, 0.0, 0usize);
+        for ((&x, &y), &z) in xs.iter().zip(ys).zip(zs) {
+            if x.is_finite() && y.is_finite() && z.is_finite() {
+                sx += x;
+                sy += y;
+                sz += z;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return Self::default();
+        }
+        let n = n as f64;
+        Self {
+            x: sx / n,
+            y: sy / n,
+            z: sz / n,
+        }
     }
-    Ok(xs
-        .iter()
-        .zip(ys)
-        .zip(zs)
-        .map(|((x, y), z)| Coord3D::new(*x as Real, *y as Real, *z as Real))
-        .collect())
+
+    fn coord(self, x: f64, y: f64, z: f64) -> Coord3D {
+        Coord3D::new(
+            (x - self.x) as Real,
+            (y - self.y) as Real,
+            (z - self.z) as Real,
+        )
+    }
+
+    /// Shift and narrow parallel `xs/ys/zs` slices; errors if their lengths differ.
+    fn coords(self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<Vec<Coord3D>, JsValue> {
+        if xs.len() != ys.len() || xs.len() != zs.len() {
+            return Err(coded_err(
+                "xs, ys, zs must have the same length",
+                "mismatched_arrays",
+            ));
+        }
+        Ok(xs
+            .iter()
+            .zip(ys)
+            .zip(zs)
+            .map(|((&x, &y), &z)| self.coord(x, y, z))
+            .collect())
+    }
 }
 
 /// Build a `Vec<Real>` from a `&[f64]` slice (casts at the boundary).
@@ -160,6 +204,7 @@ fn predictions_to_arrays(preds: Vec<Prediction3D>) -> JsValue {
 
 #[wasm_bindgen]
 pub struct WasmOrdinaryKriging3D {
+    origin: Origin3D,
     inner: OrdinaryKrigingModel3D,
 }
 
@@ -194,7 +239,8 @@ impl WasmOrdinaryKriging3D {
                 "mismatched_arrays",
             ));
         }
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let origin = Origin3D::centroid(xs, ys, zs);
+        let coords = origin.coords(xs, ys, zs)?;
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
@@ -202,14 +248,17 @@ impl WasmOrdinaryKriging3D {
         let model = OrdinaryKrigingModel3D::new(dataset, anisotropy, variogram)
             .map_err(kriging_err_to_js)?;
         let model = maybe_with_neighborhood_ok(model, max_radius, max_neighbors)?;
-        Ok(Self { inner: model })
+        Ok(Self {
+            inner: model,
+            origin,
+        })
     }
 
     /// Predict a single target. Returns `{ value, variance,
     /// conditionNumber, usedNuggetInflation }`.
     #[wasm_bindgen]
     pub fn predict(&self, x: f64, y: f64, z: f64) -> Result<JsValue, JsValue> {
-        let target = Coord3D::new(x as Real, y as Real, z as Real);
+        let target = self.origin.coord(x, y, z);
         let p = self.inner.predict(target).map_err(kriging_err_to_js)?;
         let obj = Object::new();
         set_object_field(&obj, "value", &JsValue::from_f64(p.value as f64))?;
@@ -232,7 +281,7 @@ impl WasmOrdinaryKriging3D {
     /// Float64Arrays.
     #[wasm_bindgen(js_name = predictBatch)]
     pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let coords = self.origin.coords(xs, ys, zs)?;
         let preds = self
             .inner
             .predict_batch(&coords)
@@ -245,6 +294,7 @@ impl WasmOrdinaryKriging3D {
 
 #[wasm_bindgen]
 pub struct WasmSimpleKriging3D {
+    origin: Origin3D,
     inner: SimpleKrigingModel3D,
 }
 
@@ -273,19 +323,23 @@ impl WasmSimpleKriging3D {
                 "mismatched_arrays",
             ));
         }
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let origin = Origin3D::centroid(xs, ys, zs);
+        let coords = origin.coords(xs, ys, zs)?;
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
         let variogram = variogram_model_from_js(variogram)?;
         let model = SimpleKrigingModel3D::new(dataset, anisotropy, variogram, mean as Real)
             .map_err(kriging_err_to_js)?;
-        Ok(Self { inner: model })
+        Ok(Self {
+            inner: model,
+            origin,
+        })
     }
 
     #[wasm_bindgen]
     pub fn predict(&self, x: f64, y: f64, z: f64) -> Result<JsValue, JsValue> {
-        let target = Coord3D::new(x as Real, y as Real, z as Real);
+        let target = self.origin.coord(x, y, z);
         let p = self.inner.predict(target).map_err(kriging_err_to_js)?;
         let obj = Object::new();
         set_object_field(&obj, "value", &JsValue::from_f64(p.value as f64))?;
@@ -305,7 +359,7 @@ impl WasmSimpleKriging3D {
 
     #[wasm_bindgen(js_name = predictBatch)]
     pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let coords = self.origin.coords(xs, ys, zs)?;
         let preds = self
             .inner
             .predict_batch(&coords)
@@ -318,6 +372,7 @@ impl WasmSimpleKriging3D {
 
 #[wasm_bindgen]
 pub struct WasmUniversalKriging3D {
+    origin: Origin3D,
     inner: UniversalKrigingModel3D,
 }
 
@@ -345,19 +400,23 @@ impl WasmUniversalKriging3D {
                 "mismatched_arrays",
             ));
         }
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let origin = Origin3D::centroid(xs, ys, zs);
+        let coords = origin.coords(xs, ys, zs)?;
         let dataset =
             PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
         let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
         let variogram = variogram_model_from_js(variogram)?;
         let model = UniversalKrigingModel3D::new(dataset, anisotropy, variogram, Trend3D::Linear)
             .map_err(kriging_err_to_js)?;
-        Ok(Self { inner: model })
+        Ok(Self {
+            inner: model,
+            origin,
+        })
     }
 
     #[wasm_bindgen]
     pub fn predict(&self, x: f64, y: f64, z: f64) -> Result<JsValue, JsValue> {
-        let target = Coord3D::new(x as Real, y as Real, z as Real);
+        let target = self.origin.coord(x, y, z);
         let p = self.inner.predict(target).map_err(kriging_err_to_js)?;
         let obj = Object::new();
         set_object_field(&obj, "value", &JsValue::from_f64(p.value as f64))?;
@@ -377,7 +436,7 @@ impl WasmUniversalKriging3D {
 
     #[wasm_bindgen(js_name = predictBatch)]
     pub fn predict_batch(&self, xs: &[f64], ys: &[f64], zs: &[f64]) -> Result<JsValue, JsValue> {
-        let coords = to_coords_3d(xs, ys, zs)?;
+        let coords = self.origin.coords(xs, ys, zs)?;
         let preds = self
             .inner
             .predict_batch(&coords)
@@ -434,7 +493,8 @@ pub fn wasm_gaussian_simulation_3d(
             "mismatched_arrays",
         ));
     }
-    let coords = to_coords_3d(sample_xs, sample_ys, sample_zs)?;
+    let origin = Origin3D::centroid(sample_xs, sample_ys, sample_zs);
+    let coords = origin.coords(sample_xs, sample_ys, sample_zs)?;
     let dataset =
         PlanarDataset3D::new(coords, to_real_vec(sample_values)).map_err(kriging_err_to_js)?;
     let anisotropy = parse_anisotropy(ang1, ang2, ang3, anis1, anis2)?;
@@ -444,7 +504,7 @@ pub fn wasm_gaussian_simulation_3d(
         nx,
         ny,
         nz,
-        Coord3D::new(origin_x as Real, origin_y as Real, origin_z as Real),
+        origin.coord(origin_x, origin_y, origin_z),
         Coord3D::new(spacing_x as Real, spacing_y as Real, spacing_z as Real),
     )
     .map_err(kriging_err_to_js)?;
@@ -516,7 +576,7 @@ pub fn wasm_compute_directional_variogram_3d(
             "mismatched_arrays",
         ));
     }
-    let coords = to_coords_3d(xs, ys, zs)?;
+    let coords = Origin3D::centroid(xs, ys, zs).coords(xs, ys, zs)?;
     let dataset = PlanarDataset3D::new(coords, to_real_vec(values)).map_err(kriging_err_to_js)?;
     let filter = GslibDirection {
         azm_deg,
@@ -727,9 +787,7 @@ fn parse_model_form(
     let vt = crate::variogram::spec::VariogramSpec::new(variogram_type, 0.0, 1.0, 1.0, None, None)
         .resolve_type()
         .ok_or_else(|| coded_err("unknown variogram_type", "unknown_variogram"))?;
-    let opt = |v: f64| -> Option<Real> {
-        if v.is_finite() { Some(v as Real) } else { None }
-    };
+    let opt = |v: f64| -> Option<Real> { if v.is_finite() { Some(v as Real) } else { None } };
     Ok(crate::variogram::fitting::ModelForm {
         variogram_type: vt,
         shape1: opt(shape1),

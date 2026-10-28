@@ -2,6 +2,9 @@
 //! their respective milestones. Run with `cargo test --test parity_3d -- --ignored`
 //! once tests are implemented.
 
+// Comparisons widen `Real` to `f64`; a no-op cast only under the `f64` feature.
+#![cfg_attr(feature = "f64", allow(clippy::unnecessary_cast))]
+
 mod parity_3d {
     pub mod gamv_reference;
     pub mod gslib_roundtrip;

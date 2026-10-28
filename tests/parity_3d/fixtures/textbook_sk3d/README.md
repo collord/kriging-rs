@@ -17,11 +17,11 @@ scikit-gstat / pygslib / geostatspy.
 
 System: `K λ = k₀` (no Lagrangian).
 
-- `K[i, j] = C(d(i, j))` for i ≠ j; `K[i, i] = C(0)` (the partial sill
-  under our latent-field convention).
+- `K[i, j] = C(d(i, j))` for i ≠ j; `K[i, i] = C(0)`, the total sill
+  `partial_sill + nugget` (`γ(0) = 0`, so the nugget is on the diagonal).
 - `k₀[i] = C(d(target, i))`.
 - Predicted: `m + λ · (z − m)`.
-- Variance (latent): `partial_sill − λ · k₀`.
+- Variance (standard, nugget included): `C(0) − λ · k₀`.
 
 ## Files
 
@@ -30,17 +30,20 @@ System: `K λ = k₀` (no Lagrangian).
 - `targets.csv` — 1000 random `(x, y, z)` from
   `numpy.random.default_rng(20260527)`.
 - `predictions.csv` — `(x, y, z, value, variance)` from the textbook
-  SK reference.
+  SK reference, using all 150 samples.
 
 ## Tolerance
 
-1.5e-2 relative on values, 1e-2 on variance — same as M9 OK because the
-two solvers share the same Cholesky path; SK is structurally simpler
-(no Schur complement, no μ) so drift is in the same envelope.
+Both sides solve the same equations, so they differ only by rounding:
+measured maximum relative error is ~6e-7 with `f32` storage and ~5e-15
+with `f64`. The test uses 1e-5 and 1e-10 respectively.
 
 ## Generation
 
 ```bash
-cd /Users/collord/rust-geostats-work/geostatspy-vendor
-.venv/bin/python generate_sk3d_reference.py
+python tests/parity_3d/fixtures/generate_textbook_kriging.py
 ```
+
+Regenerates the OK, SK and UK fixtures together; see
+[`../textbook_ok3d/README.md`](../textbook_ok3d/README.md#nugget-and-variance-convention) for why
+the original fixture was replaced.

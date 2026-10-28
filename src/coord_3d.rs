@@ -51,7 +51,6 @@ impl Coord3D {
             Orientation::ZPositiveDown => Self { x, y, z: -z },
         }
     }
-
 }
 
 /// Componentwise subtraction returning the lag vector `self - other`.

@@ -3,14 +3,15 @@
 // hardware that produced the native benchmark.
 
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgUrl = resolve(here, "..", "pkg", "kriging_rs.js");
 const wasmUrl = resolve(here, "..", "pkg", "kriging_rs_bg.wasm");
 
-const mod = await import(pkgUrl);
+// import() needs a file:// URL; a bare absolute path breaks on Windows (drive-letter paths).
+const mod = await import(pathToFileURL(pkgUrl).href);
 const wasmBytes = await readFile(wasmUrl);
 await mod.default({ module_or_path: wasmBytes });
 
@@ -28,7 +29,7 @@ const zs = new Float64Array(sampleLines.map(l => Number(l.split(",")[2])));
 const values = new Float64Array(sampleLines.map(l => Number(l.split(",")[3])));
 console.log(`Loaded ${xs.length} samples`);
 
-const variogramArgs = ["exponential", 0.05, 1.0, 30.0, undefined];
+const variogram = { variogramType: "exponential", nugget: 0.05, sill: 1.0, range: 30.0 };
 
 function makeGridArgs(n) {
   const nz = Math.max(1, Math.round(n / 2));
@@ -44,7 +45,7 @@ function timeOne(n) {
   gaussianSimulation3D(
     xs, ys, zs, values,
     0, 0, 0, 1, 1,
-    ...variogramArgs,
+    variogram,
     ...makeGridArgs(n),
     1234n,
     1,

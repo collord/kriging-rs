@@ -237,8 +237,14 @@ export function simulateBinomialGridSummary(
   options: SimulateBinomialGridSummaryOptions
 ): BinomialGridSummary {
   const ensemble = simulateBinomialGridEnsemble(options);
-  const { xCells, yCells, nRealizations, nTargets, logitSamples, prevalenceSamples } =
-    ensemble;
+  const {
+    xCells,
+    yCells,
+    nRealizations,
+    nTargets,
+    logitSamples,
+    prevalenceSamples,
+  } = ensemble;
   const summarizeOn = options.summarizeOn ?? "prevalence";
   const quantiles = options.quantiles ?? [];
   const exceedanceThresholds = options.exceedanceThresholds ?? [];

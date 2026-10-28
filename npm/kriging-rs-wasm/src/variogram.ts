@@ -1,7 +1,9 @@
 /**
- * Variogram entry points: parametric fitting (`fitVariogram`) plus direct empirical
- * variogram APIs (`computeEmpiricalVariogram`, `computeDirectionalEmpiricalVariogram`)
- * and nested-variogram evaluation (`evaluateNestedVariogram`).
+ * Variogram entry points: parametric fitting (`fitVariogram` for lat/lon,
+ * `fitVariogramProjected` for planar x/y) plus direct empirical variogram APIs
+ * (`computeEmpiricalVariogram`, `computeEmpiricalVariogramProjected`,
+ * `computeDirectionalEmpiricalVariogram`) and nested-variogram evaluation
+ * (`evaluateNestedVariogram`).
  *
  * @module
  */
@@ -22,8 +24,10 @@ import {
 import type {
   ComputeDirectionalEmpiricalVariogramOptions,
   ComputeEmpiricalVariogramOptions,
+  ComputeEmpiricalVariogramProjectedOptions,
   EmpiricalVariogramResult,
   FitVariogramOptions,
+  FitVariogramProjectedOptions,
   FittedVariogram,
   NestedVariogramComponent,
   NestedVariogramEvaluation,
@@ -73,6 +77,51 @@ export function fitVariogram(options: FitVariogramOptions): FittedVariogram {
   } catch (e) {
     throw wrapThrown(e);
   }
+  return mapFittedVariogram(out);
+}
+
+/**
+ * Fit a variogram model to **planar** `(x, y)` sample data (e.g. projected metres). The
+ * planar counterpart of {@link fitVariogram}: distances are Euclidean, so the fitted
+ * `range` is in the coordinates' units and the result plugs straight into
+ * {@link ProjectedKriging.fromFitted}.
+ *
+ * @example
+ * const fitted = fitVariogramProjected({ xs, ys, values, variogramType: "spherical" });
+ * using model = ProjectedKriging.fromFitted({ xs, ys, values, fittedVariogram: fitted });
+ */
+export function fitVariogramProjected(
+  options: FitVariogramProjectedOptions
+): FittedVariogram {
+  const {
+    xs,
+    ys,
+    values,
+    variogramType,
+    maxDistance,
+    nBins = 12,
+    estimator,
+  } = options;
+  const mod = requireLoadedModule();
+  const variogramTypeNum = variogramTypeToNumber(variogramType);
+  let out: unknown;
+  try {
+    out = mod.fitVariogramProjected(
+      toFloat64Array(xs),
+      toFloat64Array(ys),
+      toFloat64Array(values),
+      maxDistance,
+      nBins,
+      variogramTypeNum,
+      estimator
+    );
+  } catch (e) {
+    throw wrapThrown(e);
+  }
+  return mapFittedVariogram(out);
+}
+
+function mapFittedVariogram(out: unknown): FittedVariogram {
   const result = asRecord(out);
   const fitted: FittedVariogram = {
     variogramType: requireVariogramType(result.variogramType),
@@ -119,6 +168,32 @@ export function computeEmpiricalVariogram(
     const out = mod.computeEmpiricalVariogram(
       toFloat64Array(sampleLats),
       toFloat64Array(sampleLons),
+      toFloat64Array(values),
+      maxDistance,
+      nBins,
+      estimator
+    );
+    return mapEmpiricalVariogram(out);
+  } catch (e) {
+    throw wrapThrown(e);
+  }
+}
+
+/**
+ * Compute the (isotropic) empirical variogram cloud on **planar** `(x, y)` data without
+ * fitting a model. The planar counterpart of {@link computeEmpiricalVariogram}: Euclidean
+ * distances in the coordinates' units. Plot it next to the fitted model (via
+ * {@link evaluateNestedVariogram}) to judge the fit.
+ */
+export function computeEmpiricalVariogramProjected(
+  options: ComputeEmpiricalVariogramProjectedOptions
+): EmpiricalVariogramResult {
+  const mod = requireLoadedModule();
+  const { xs, ys, values, maxDistance, nBins = 12, estimator } = options;
+  try {
+    const out = mod.computeEmpiricalVariogramProjected(
+      toFloat64Array(xs),
+      toFloat64Array(ys),
       toFloat64Array(values),
       maxDistance,
       nBins,

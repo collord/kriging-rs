@@ -1,0 +1,19 @@
+{
+  "name": "kriging-rs-web-2d-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "node --experimental-strip-types scripts/check.ts"
+  },
+  "dependencies": {
+    "kriging-rs-wasm": "file:../../npm/kriging-rs-wasm"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.2",
+    "vite": "^6.0.3"
+  }
+}

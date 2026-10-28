@@ -185,3 +185,83 @@ fn binomial_predict_batch_matches_repeated_predict() {
         assert!((batch_pred.variance - single_pred.variance).abs() < 1e-12);
     }
 }
+
+/// Regression: the nugget must reach the kriging-matrix diagonal. With the total sill held
+/// fixed, a larger nugget means less spatial structure, so the variance near (but not at)
+/// stations must rise; far beyond the range it is `sill + 1/(1ᵀK⁻¹1)`, so at least the sill;
+/// and kriging stays (nearly) exact at a station. Before the fix `γ(0)` returned the nugget,
+/// `C(0)` was the partial sill, and the variance *fell* as the nugget rose — in every
+/// kriging path below.
+#[test]
+fn larger_nugget_raises_kriging_variance_in_every_path() {
+    use kriging_rs::{
+        Anisotropy2D, Anisotropy3D, Coord3D, OrdinaryKrigingModel3D, PlanarDataset3D,
+        ProjectedCoord, ProjectedDataset, ProjectedKrigingModel,
+    };
+
+    let (sill, range) = (1.0, 5.0);
+    let pts: [(Real, Real); 4] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.2)];
+    let values: Vec<Real> = vec![0.0, 2.0, 1.0, 3.0];
+    let (near, far) = ((0.3, 0.4), (500.0, 500.0));
+
+    // (variance near the stations, variance far away, estimate at station 1)
+    let run = |nugget: Real| -> [(Real, Real, Real); 3] {
+        let vg = VariogramModel::new(nugget, sill, range, VariogramType::Exponential).unwrap();
+
+        // 2-D geographic: 1 degree ≈ 111 km, so scale the planar layout down to stay in range.
+        let geo = |(x, y): (Real, Real)| coord(y * 0.009, x * 0.009);
+        let ds = GeoDataset::new(pts.iter().map(|&p| geo(p)).collect(), values.clone()).unwrap();
+        let ok = OrdinaryKrigingModel::new(ds, vg).unwrap();
+        let ok2d = (
+            ok.predict(geo(near)).unwrap().variance,
+            ok.predict(coord(60.0, 60.0)).unwrap().variance,
+            ok.predict(geo(pts[1])).unwrap().value,
+        );
+
+        let pc = |(x, y): (Real, Real)| ProjectedCoord::new(x, y);
+        let ds =
+            ProjectedDataset::new(pts.iter().map(|&p| pc(p)).collect(), values.clone()).unwrap();
+        let pk = ProjectedKrigingModel::new(ds, vg, Anisotropy2D::isotropic()).unwrap();
+        let proj = (
+            pk.predict(pc(near)).unwrap().variance,
+            pk.predict(pc(far)).unwrap().variance,
+            pk.predict(pc(pts[1])).unwrap().value,
+        );
+
+        let c3 = |(x, y): (Real, Real)| Coord3D::new(x, y, 0.0);
+        let ds =
+            PlanarDataset3D::new(pts.iter().map(|&p| c3(p)).collect(), values.clone()).unwrap();
+        let k3 = OrdinaryKrigingModel3D::new(ds, Anisotropy3D::identity(), vg).unwrap();
+        let ok3d = (
+            k3.predict(c3(near)).unwrap().variance,
+            k3.predict(c3(far)).unwrap().variance,
+            k3.predict(c3(pts[1])).unwrap().value,
+        );
+        [ok2d, proj, ok3d]
+    };
+
+    let labels = ["2-D ordinary", "projected", "3-D ordinary"];
+    let by_nugget: Vec<_> = [0.0, 0.3, 0.6].into_iter().map(run).collect();
+    for (k, label) in labels.iter().enumerate() {
+        for w in by_nugget.windows(2) {
+            let (lo, hi) = (w[0][k], w[1][k]);
+            assert!(
+                hi.0 > lo.0 + 0.05,
+                "{label}: near variance must rise with nugget: {lo:?} -> {hi:?}"
+            );
+        }
+        for row in &by_nugget {
+            let (_, far_var, at_station) = row[k];
+            assert!(
+                far_var >= sill - 1e-4,
+                "{label}: far variance {far_var} below sill {sill}"
+            );
+            // Not bit-exact: the diagonal jitter (≤ 1 % of the nugget) sits on the matrix
+            // diagonal but not on the right-hand side.
+            assert!(
+                (at_station - values[1]).abs() < 1e-2,
+                "{label}: not exact at station: {at_station}"
+            );
+        }
+    }
+}

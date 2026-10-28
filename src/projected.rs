@@ -25,7 +25,7 @@ use crate::kriging::binomial::{
     BinomialPrior, HeteroskedasticBinomialConfig, logit_observation_variance_empirical_bayes,
 };
 
-use crate::kriging::ordinary::{Prediction, kriging_diagonal_jitter};
+use crate::kriging::ordinary::{Neighborhood, Prediction, kriging_diagonal_jitter};
 use crate::utils::{Probability, logistic, logit};
 use crate::variogram::empirical::{EmpiricalVariogram, PositiveReal};
 use crate::variogram::models::VariogramModel;
@@ -251,6 +251,24 @@ pub fn compute_directional_empirical_variogram(
     })
 }
 
+/// Omnidirectional empirical variogram on projected coordinates (Euclidean distance, in the
+/// coordinates' units). The planar counterpart of
+/// [`compute_empirical_variogram`](crate::compute_empirical_variogram): same binning, same
+/// `max_distance` default (the largest pair separation), same classical / Cressie–Hawkins
+/// estimators. Feed the result to [`fit_variogram`](crate::fit_variogram) to fit a model
+/// whose range is in the coordinates' units.
+pub fn compute_empirical_variogram_projected(
+    dataset: &ProjectedDataset,
+    config: &crate::variogram::empirical::VariogramConfig,
+) -> Result<EmpiricalVariogram, KrigingError> {
+    let coords = &dataset.coords;
+    crate::variogram::empirical::empirical_variogram_with_distance(
+        &dataset.values,
+        config,
+        |i, j| euclidean_distance(coords[i], coords[j]),
+    )
+}
+
 /// Dataset of projected coordinates and paired values. Construction validates lengths.
 #[derive(Debug, Clone)]
 pub struct ProjectedDataset {
@@ -277,29 +295,128 @@ impl ProjectedDataset {
 /// Ordinary kriging on projected (planar) coordinates with optional 2-D geometric
 /// anisotropy. The variogram's range must be expressed in the same linear units as the
 /// coordinates (e.g. km, m).
+///
+/// By default every prediction uses all stations through one LU factorization of the full
+/// `(n+1)²` system, built at construction (`O(n³)`; each target then costs `O(n²)`). For
+/// thousands of stations, use a search [`Neighborhood`] instead: [`new_local`](Self::new_local)
+/// skips the full factorization entirely and solves a small system on the nearest stations
+/// per target. Neighbors are ranked by the *anisotropic* distance, so the search ellipse
+/// matches the variogram, and found through a k-d tree rather than a scan.
+///
+/// Internally every coordinate is mapped once into the anisotropy frame (major axis on x,
+/// minor axis stretched by `1 / range_ratio`), where the anisotropic distance is plain
+/// Euclidean distance; no trigonometry is evaluated per pair.
 #[derive(Debug)]
 pub struct ProjectedKrigingModel {
+    /// Station coordinates in the anisotropy frame (see the type docs).
     coords: Vec<ProjectedCoord>,
     values: Vec<Real>,
     variogram: VariogramModel,
     anisotropy: Anisotropy2D,
+    frame: AnisotropyFrame,
     cov_at_zero: Real,
+    /// Non-negative extra variance per station on the covariance diagonal (empty means none).
+    observation_diagonal: Vec<Real>,
+    neighborhood: Option<Neighborhood>,
+    /// Neighbor index over `coords`; present whenever a neighborhood is.
+    index: Option<PlanarIndex>,
+    /// Full-data system and its LU; `None` for a model built with [`Self::new_local`] until a
+    /// full-data prediction is requested via [`Self::set_neighborhood`]`(None)`.
+    global: Option<GlobalSystem>,
+}
+
+/// Linear map into the anisotropy frame: rotate the major axis onto +x, then stretch the
+/// minor axis by `1 / range_ratio`. Euclidean distance there equals
+/// [`Anisotropy2D::distance`] between the original points.
+#[derive(Debug, Clone, Copy)]
+struct AnisotropyFrame {
+    cos: Real,
+    sin: Real,
+    inv_ratio: Real,
+}
+
+impl AnisotropyFrame {
+    fn new(anisotropy: Anisotropy2D) -> Self {
+        let theta = anisotropy.major_angle_deg.to_radians();
+        Self {
+            cos: theta.cos(),
+            sin: theta.sin(),
+            inv_ratio: 1.0 / anisotropy.range_ratio,
+        }
+    }
+
+    fn apply(self, c: ProjectedCoord) -> ProjectedCoord {
+        ProjectedCoord::new(
+            c.x * self.cos + c.y * self.sin,
+            (-c.x * self.sin + c.y * self.cos) * self.inv_ratio,
+        )
+    }
+}
+
+type PlanarTree = kiddo::immutable::float::kdtree::ImmutableKdTree<f64, u64, 2, 32>;
+
+#[derive(Debug, Clone)]
+struct PlanarIndex(PlanarTree);
+
+impl PlanarIndex {
+    fn build(coords: &[ProjectedCoord]) -> Self {
+        let entries: Vec<[f64; 2]> = coords.iter().map(|c| [c.x as f64, c.y as f64]).collect();
+        Self((&*entries).into())
+    }
+
+    /// `(station, distance)` pairs selected by `neighborhood`, for a target already in the
+    /// anisotropy frame.
+    fn select(&self, target: ProjectedCoord, neighborhood: Neighborhood) -> Vec<(usize, Real)> {
+        use kiddo::SquaredEuclidean;
+        let q = [target.x as f64, target.y as f64];
+        let found = match (neighborhood.max_neighbors, neighborhood.max_radius) {
+            (Some(k), _) => {
+                let k = NonZeroUsize::new(k).expect("validated: max_neighbors >= 1");
+                self.0.nearest_n::<SquaredEuclidean>(&q, k)
+            }
+            (None, Some(r)) => {
+                let r = r as f64;
+                self.0.within_unsorted::<SquaredEuclidean>(&q, r * r)
+            }
+            (None, None) => unreachable!("validated: an empty neighborhood is None"),
+        };
+        let radius = neighborhood.max_radius;
+        found
+            .into_iter()
+            .map(|nn| (nn.item as usize, nn.distance.sqrt() as Real))
+            .filter(|&(_, d)| radius.is_none_or(|r| d <= r))
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+struct GlobalSystem {
     system: DMatrix<Real>,
-    system_lu: LU<Real, Dyn, Dyn>,
+    lu: LU<Real, Dyn, Dyn>,
+}
+
+impl Clone for GlobalSystem {
+    fn clone(&self) -> Self {
+        Self {
+            system: self.system.clone(),
+            lu: self.system.clone().lu(),
+        }
+    }
 }
 
 impl Clone for ProjectedKrigingModel {
     fn clone(&self) -> Self {
-        let system = self.system.clone();
-        let system_lu = system.clone().lu();
         Self {
             coords: self.coords.clone(),
             values: self.values.clone(),
             variogram: self.variogram,
             anisotropy: self.anisotropy,
             cov_at_zero: self.cov_at_zero,
-            system,
-            system_lu,
+            frame: self.frame,
+            observation_diagonal: self.observation_diagonal.clone(),
+            neighborhood: self.neighborhood,
+            index: self.index.clone(),
+            global: self.global.clone(),
         }
     }
 }
@@ -313,6 +430,37 @@ impl ProjectedKrigingModel {
         anisotropy: Anisotropy2D,
     ) -> Result<Self, KrigingError> {
         Self::new_with_extra_diagonal_internal(dataset, variogram, anisotropy, &[])
+    }
+
+    /// Build a model that predicts from a search neighborhood only, without factorizing the
+    /// full-data system. Construction is `O(n)`; each prediction selects the neighbors and
+    /// solves a `(k+1)²` system. Prefer this over [`new`](Self::new) for large `n`.
+    pub fn new_local(
+        dataset: ProjectedDataset,
+        variogram: VariogramModel,
+        anisotropy: Anisotropy2D,
+        neighborhood: Neighborhood,
+    ) -> Result<Self, KrigingError> {
+        let neighborhood = validate_neighborhood(neighborhood)?.ok_or_else(|| {
+            KrigingError::InvalidInput(
+                "new_local needs a neighborhood with maxNeighbors and/or maxRadius".to_string(),
+            )
+        })?;
+        let frame = AnisotropyFrame::new(anisotropy);
+        let coords: Vec<ProjectedCoord> =
+            dataset.coords.into_iter().map(|c| frame.apply(c)).collect();
+        Ok(Self {
+            index: Some(PlanarIndex::build(&coords)),
+            coords,
+            values: dataset.values,
+            variogram,
+            anisotropy,
+            frame,
+            cov_at_zero: variogram.covariance(0.0),
+            observation_diagonal: Vec::new(),
+            neighborhood: Some(neighborhood),
+            global: None,
+        })
     }
 
     /// Like [`new`](Self::new) but adds `extra` (length `n`) to each main-diagonal covariance
@@ -345,59 +493,115 @@ impl ProjectedKrigingModel {
         anisotropy: Anisotropy2D,
         extra: &[Real],
     ) -> Result<Self, KrigingError> {
-        let coords = dataset.coords;
-        let values = dataset.values;
-        let n = coords.len();
+        let n = dataset.coords.len();
         if !extra.is_empty() && extra.len() != n {
             return Err(KrigingError::InvalidInput(
                 "internal: extra length mismatch for projected kriging".to_string(),
             ));
         }
-        let mut system = DMatrix::from_element(n + 1, n + 1, 0.0);
-        let diag_eps = kriging_diagonal_jitter(n, variogram);
-        for i in 0..n {
-            for j in i..n {
-                let d = anisotropy.distance(coords[i], coords[j]);
-                let mut cov = variogram.covariance(d);
-                if i == j {
+        let frame = AnisotropyFrame::new(anisotropy);
+        let mut model = Self {
+            coords: dataset.coords.into_iter().map(|c| frame.apply(c)).collect(),
+            values: dataset.values,
+            variogram,
+            anisotropy,
+            frame,
+            cov_at_zero: variogram.covariance(0.0),
+            observation_diagonal: extra.to_vec(),
+            neighborhood: None,
+            index: None,
+            global: None,
+        };
+        model.global = Some(model.factorize_global()?);
+        Ok(model)
+    }
+
+    /// Ordinary-kriging matrix over the stations in `idx` (bordered by the unbiasedness
+    /// row), with jitter and any per-station observation variance on the diagonal.
+    fn build_system(&self, idx: &[usize]) -> DMatrix<Real> {
+        let k = idx.len();
+        let mut system = DMatrix::from_element(k + 1, k + 1, 0.0);
+        let diag_eps = kriging_diagonal_jitter(k, self.variogram);
+        for a in 0..k {
+            let si = idx[a];
+            for b in a..k {
+                let sj = idx[b];
+                let d = euclidean_distance(self.coords[si], self.coords[sj]);
+                let mut cov = self.variogram.covariance(d);
+                if a == b {
                     cov += diag_eps;
-                    if let Some(&dextra) = extra.get(i) {
+                    if let Some(&dextra) = self.observation_diagonal.get(si) {
                         cov += dextra;
                     }
                 }
-                system[(i, j)] = cov;
-                system[(j, i)] = cov;
+                system[(a, b)] = cov;
+                system[(b, a)] = cov;
             }
-            system[(i, n)] = 1.0;
-            system[(n, i)] = 1.0;
+            system[(a, k)] = 1.0;
+            system[(k, a)] = 1.0;
         }
-        system[(n, n)] = 0.0;
+        system
+    }
 
-        let system_lu = system.clone().lu();
+    fn factorize_global(&self) -> Result<GlobalSystem, KrigingError> {
+        let n = self.coords.len();
+        let all: Vec<usize> = (0..n).collect();
+        let system = self.build_system(&all);
+        let lu = system.clone().lu();
         let mut probe = DVector::from_element(n + 1, 0.0);
         probe[n] = 1.0;
-        if system_lu.solve(&probe).is_none() {
+        if lu.solve(&probe).is_none() {
             return Err(KrigingError::MatrixError(
                 "could not factorize projected kriging system".to_string(),
             ));
         }
-
-        Ok(Self {
-            coords,
-            values,
-            variogram,
-            anisotropy,
-            cov_at_zero: variogram.covariance(0.0),
-            system,
-            system_lu,
-        })
+        Ok(GlobalSystem { system, lu })
     }
 
     pub fn anisotropy(&self) -> Anisotropy2D {
         self.anisotropy
     }
 
+    /// The active search neighborhood, if any (`None` means every station is used).
+    pub fn neighborhood(&self) -> Option<Neighborhood> {
+        self.neighborhood
+    }
+
+    /// Restrict predictions to a search neighborhood (`max_neighbors` nearest and/or within
+    /// `max_radius`, in coordinate units, ranked by anisotropic distance), or pass `None` to
+    /// use every station. Clearing the neighborhood on a [`new_local`](Self::new_local) model
+    /// factorizes the full system first, which can fail on a singular system.
+    pub fn set_neighborhood(
+        &mut self,
+        neighborhood: Option<Neighborhood>,
+    ) -> Result<(), KrigingError> {
+        let neighborhood = match neighborhood {
+            Some(nb) => validate_neighborhood(nb)?,
+            None => None,
+        };
+        if neighborhood.is_none() && self.global.is_none() {
+            self.global = Some(self.factorize_global()?);
+        }
+        if neighborhood.is_some() && self.index.is_none() {
+            self.index = Some(PlanarIndex::build(&self.coords));
+        }
+        self.neighborhood = neighborhood;
+        Ok(())
+    }
+
+    /// Builder form of [`set_neighborhood`](Self::set_neighborhood).
+    pub fn with_neighborhood(
+        mut self,
+        neighborhood: Option<Neighborhood>,
+    ) -> Result<Self, KrigingError> {
+        self.set_neighborhood(neighborhood)?;
+        Ok(self)
+    }
+
     pub fn predict(&self, coord: ProjectedCoord) -> Result<Prediction, KrigingError> {
+        if let Some(nb) = self.neighborhood {
+            return self.predict_local(coord, nb);
+        }
         let mut rhs = DVector::from_element(self.coords.len() + 1, 0.0);
         self.predict_with_rhs(coord, &mut rhs)
     }
@@ -411,21 +615,70 @@ impl ProjectedKrigingModel {
             let n = self.coords.len();
             coords
                 .par_iter()
-                .map(|c| {
-                    let mut rhs = DVector::from_element(n + 1, 0.0);
-                    self.predict_with_rhs(*c, &mut rhs)
+                .map(|c| match self.neighborhood {
+                    Some(nb) => self.predict_local(*c, nb),
+                    None => {
+                        let mut rhs = DVector::from_element(n + 1, 0.0);
+                        self.predict_with_rhs(*c, &mut rhs)
+                    }
                 })
                 .collect()
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let mut rhs = DVector::from_element(self.coords.len() + 1, 0.0);
             let mut out = Vec::with_capacity(coords.len());
-            for &c in coords {
-                out.push(self.predict_with_rhs(c, &mut rhs)?);
+            match self.neighborhood {
+                Some(nb) => {
+                    for &c in coords {
+                        out.push(self.predict_local(c, nb)?);
+                    }
+                }
+                None => {
+                    let mut rhs = DVector::from_element(self.coords.len() + 1, 0.0);
+                    for &c in coords {
+                        out.push(self.predict_with_rhs(c, &mut rhs)?);
+                    }
+                }
             }
             Ok(out)
         }
+    }
+
+    fn predict_local(
+        &self,
+        coord: ProjectedCoord,
+        neighborhood: Neighborhood,
+    ) -> Result<Prediction, KrigingError> {
+        let index = self
+            .index
+            .as_ref()
+            .expect("an index is built whenever a neighborhood is set");
+        let indexed = index.select(self.frame.apply(coord), neighborhood);
+        let k = indexed.len();
+        if k == 0 {
+            return Err(KrigingError::InvalidInput(
+                "no stations in search neighborhood for target point".to_string(),
+            ));
+        }
+        let idx: Vec<usize> = indexed.iter().map(|&(i, _)| i).collect();
+        let mut rhs = DVector::from_element(k + 1, 0.0);
+        for (a, &(_, d)) in indexed.iter().enumerate() {
+            rhs[a] = self.variogram.covariance(d);
+        }
+        rhs[k] = 1.0;
+        let sol = self.build_system(&idx).lu().solve(&rhs).ok_or_else(|| {
+            KrigingError::MatrixError(
+                "could not solve local (neighborhood) projected kriging system".to_string(),
+            )
+        })?;
+        let mut value: Real = 0.0;
+        let mut cov_dot: Real = 0.0;
+        for (a, &si) in idx.iter().enumerate() {
+            value += sol[a] * self.values[si];
+            cov_dot += sol[a] * rhs[a];
+        }
+        let variance = (self.cov_at_zero - cov_dot - sol[k]).max(0.0);
+        Ok(Prediction { value, variance })
     }
 
     fn predict_with_rhs(
@@ -433,13 +686,20 @@ impl ProjectedKrigingModel {
         coord: ProjectedCoord,
         rhs: &mut DVector<Real>,
     ) -> Result<Prediction, KrigingError> {
+        let global = self.global.as_ref().ok_or_else(|| {
+            KrigingError::InvalidInput(
+                "model was built for neighborhood prediction; set a neighborhood".to_string(),
+            )
+        })?;
         let n = self.coords.len();
+        let target = self.frame.apply(coord);
         for i in 0..n {
-            let d = self.anisotropy.distance(self.coords[i], coord);
-            rhs[i] = self.variogram.covariance(d);
+            rhs[i] = self
+                .variogram
+                .covariance(euclidean_distance(self.coords[i], target));
         }
         rhs[n] = 1.0;
-        let sol = self.system_lu.solve(rhs).ok_or_else(|| {
+        let sol = global.lu.solve(rhs).ok_or_else(|| {
             KrigingError::MatrixError("could not solve projected kriging system".to_string())
         })?;
         let mut value: Real = 0.0;
@@ -452,6 +712,27 @@ impl ProjectedKrigingModel {
         let variance = (self.cov_at_zero - cov_dot - mu).max(0.0);
         Ok(Prediction { value, variance })
     }
+}
+
+/// Reject `max_neighbors = 0` and non-finite or non-positive `max_radius`; a neighborhood
+/// with neither bound means "all stations" and normalizes to `None`.
+fn validate_neighborhood(nb: Neighborhood) -> Result<Option<Neighborhood>, KrigingError> {
+    if nb.max_neighbors == Some(0) {
+        return Err(KrigingError::InvalidInput(
+            "maxNeighbors must be at least 1".to_string(),
+        ));
+    }
+    if let Some(r) = nb.max_radius
+        && !(r.is_finite() && r > 0.0)
+    {
+        return Err(KrigingError::InvalidInput(
+            "maxRadius must be finite and positive".to_string(),
+        ));
+    }
+    if nb.max_neighbors.is_none() && nb.max_radius.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(nb))
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +1026,166 @@ impl BinomialProjectedKrigingModel {
 mod tests {
     use super::*;
     use crate::variogram::models::VariogramType;
+
+    fn planar_samples() -> ProjectedDataset {
+        let coords: Vec<ProjectedCoord> = (0..40)
+            .map(|i| {
+                let i = i as Real;
+                ProjectedCoord::new((i * 37.0) % 230.0 + i * 0.5, (i * 53.0) % 170.0)
+            })
+            .collect();
+        let values = coords
+            .iter()
+            .map(|c| (c.x / 60.0).sin() + (c.y / 45.0).cos())
+            .collect();
+        ProjectedDataset::new(coords, values).unwrap()
+    }
+
+    #[test]
+    fn omnidirectional_projected_variogram_matches_directional_at_90_degrees() {
+        use crate::variogram::empirical::VariogramConfig;
+        let ds = planar_samples();
+        let n_bins = NonZeroUsize::new(8).unwrap();
+        let max_distance = PositiveReal::try_new(150.0).unwrap();
+        let omni = compute_empirical_variogram_projected(
+            &ds,
+            &VariogramConfig {
+                max_distance: Some(max_distance),
+                n_bins,
+                ..VariogramConfig::default()
+            },
+        )
+        .unwrap();
+        let directional = compute_directional_empirical_variogram(
+            &ds.coords,
+            &ds.values,
+            max_distance,
+            n_bins,
+            DirectionalConfig::new(0.0, 90.0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(omni.n_pairs, directional.n_pairs);
+        for (a, b) in omni.semivariances.iter().zip(&directional.semivariances) {
+            assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+        }
+
+        // With no distance cap every pair lands in exactly one bin.
+        let all = compute_empirical_variogram_projected(&ds, &VariogramConfig::default()).unwrap();
+        let n = ds.coords.len();
+        assert_eq!(all.n_pairs.iter().sum::<usize>(), n * (n - 1) / 2);
+    }
+
+    fn planar_model_inputs() -> (ProjectedDataset, VariogramModel) {
+        let vg = VariogramModel::new(0.05, 1.0, 120.0, VariogramType::Exponential).unwrap();
+        (planar_samples(), vg)
+    }
+
+    fn assert_same(a: Prediction, b: Prediction) {
+        assert!((a.value - b.value).abs() < 1e-3, "{a:?} vs {b:?}");
+        assert!((a.variance - b.variance).abs() < 1e-3, "{a:?} vs {b:?}");
+    }
+
+    #[test]
+    fn neighborhood_covering_every_station_reproduces_the_global_solution() {
+        let (ds, vg) = planar_model_inputs();
+        let n = ds.coords.len();
+        let aniso = Anisotropy2D::new(30.0, 0.6).unwrap();
+        let global = ProjectedKrigingModel::new(ds.clone(), vg, aniso).unwrap();
+        let local =
+            ProjectedKrigingModel::new_local(ds.clone(), vg, aniso, Neighborhood::nearest(n))
+                .unwrap();
+        let toggled = ProjectedKrigingModel::new(ds.clone(), vg, aniso)
+            .unwrap()
+            .with_neighborhood(Some(Neighborhood::nearest(n)))
+            .unwrap();
+        // Radius-only neighborhoods take the k-d tree's range query instead of k-nearest.
+        let by_radius =
+            ProjectedKrigingModel::new_local(ds, vg, aniso, Neighborhood::within_radius(1e6))
+                .unwrap();
+        let targets = [
+            ProjectedCoord::new(12.0, 30.0),
+            ProjectedCoord::new(150.0, 90.0),
+            ProjectedCoord::new(400.0, -50.0),
+        ];
+        for &t in &targets {
+            let g = global.predict(t).unwrap();
+            assert_same(g, local.predict(t).unwrap());
+            assert_same(g, toggled.predict(t).unwrap());
+            assert_same(g, by_radius.predict(t).unwrap());
+        }
+        let batch = local.predict_batch(&targets).unwrap();
+        for (&t, b) in targets.iter().zip(batch) {
+            assert_same(global.predict(t).unwrap(), b);
+        }
+    }
+
+    #[test]
+    fn clearing_the_neighborhood_of_a_local_model_factorizes_the_full_system() {
+        let (ds, vg) = planar_model_inputs();
+        let iso = Anisotropy2D::isotropic();
+        let global = ProjectedKrigingModel::new(ds.clone(), vg, iso).unwrap();
+        let mut local =
+            ProjectedKrigingModel::new_local(ds, vg, iso, Neighborhood::nearest(4)).unwrap();
+        local.set_neighborhood(None).unwrap();
+        assert_eq!(local.neighborhood(), None);
+        let t = ProjectedCoord::new(77.0, 44.0);
+        assert_same(global.predict(t).unwrap(), local.predict(t).unwrap());
+    }
+
+    #[test]
+    fn neighborhoods_are_ranked_by_anisotropic_distance() {
+        // Major axis along +x with a 5:1 ratio: the station 10 units east is "closer" than
+        // the one 6 units north (anisotropic distance 6 / 0.2 = 30).
+        let ds = ProjectedDataset::new(
+            vec![
+                ProjectedCoord::new(10.0, 0.0),
+                ProjectedCoord::new(0.0, 6.0),
+            ],
+            vec![1.0, 9.0],
+        )
+        .unwrap();
+        let vg = VariogramModel::new(0.0, 1.0, 100.0, VariogramType::Exponential).unwrap();
+        let aniso = Anisotropy2D::new(0.0, 0.2).unwrap();
+        let model =
+            ProjectedKrigingModel::new_local(ds, vg, aniso, Neighborhood::nearest(1)).unwrap();
+        let p = model.predict(ProjectedCoord::new(0.0, 0.0)).unwrap();
+        assert!(
+            (p.value - 1.0).abs() < 1e-5,
+            "picked the wrong neighbor: {p:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_neighborhoods_are_rejected_and_empty_means_all_stations() {
+        let (ds, vg) = planar_model_inputs();
+        let iso = Anisotropy2D::isotropic();
+        let bad = [
+            Neighborhood::nearest(0),
+            Neighborhood::within_radius(0.0),
+            Neighborhood::within_radius(Real::NAN),
+        ];
+        for nb in bad {
+            assert!(ProjectedKrigingModel::new_local(ds.clone(), vg, iso, nb).is_err());
+        }
+        let empty = Neighborhood {
+            max_neighbors: None,
+            max_radius: None,
+        };
+        assert!(ProjectedKrigingModel::new_local(ds.clone(), vg, iso, empty).is_err());
+        let model = ProjectedKrigingModel::new(ds, vg, iso)
+            .unwrap()
+            .with_neighborhood(Some(empty))
+            .unwrap();
+        assert_eq!(model.neighborhood(), None);
+        let far = ProjectedKrigingModel::new_local(
+            planar_samples(),
+            vg,
+            iso,
+            Neighborhood::within_radius(1.0),
+        )
+        .unwrap();
+        assert!(far.predict(ProjectedCoord::new(1e5, 1e5)).is_err());
+    }
 
     #[test]
     fn euclidean_distance_matches_pythagoras() {

@@ -71,13 +71,27 @@ impl Default for VariogramConfig {
     }
 }
 
+/// Omnidirectional empirical variogram of a geographic dataset (Haversine distance, km).
+/// See [`compute_empirical_variogram_projected`](crate::compute_empirical_variogram_projected)
+/// for planar `(x, y)` data.
 pub fn compute_empirical_variogram(
     dataset: &GeoDataset,
     config: &VariogramConfig,
 ) -> Result<EmpiricalVariogram, KrigingError> {
     let coords = dataset.coords();
-    let values = dataset.values();
-    let n = coords.len();
+    empirical_variogram_with_distance(dataset.values(), config, |i, j| {
+        haversine_distance(coords[i], coords[j])
+    })
+}
+
+/// Shared binning + estimator core: `distance(i, j)` gives the separation of samples `i`
+/// and `j`, so geographic and planar variograms differ only in the closure they pass.
+pub(crate) fn empirical_variogram_with_distance(
+    values: &[Real],
+    config: &VariogramConfig,
+    distance: impl Fn(usize, usize) -> Real,
+) -> Result<EmpiricalVariogram, KrigingError> {
+    let n = values.len();
     let n_bins = config.n_bins.get();
     let mut dist_sums = vec![0.0 as Real; n_bins];
     // For the Cressie–Hawkins estimator we accumulate Σ |Δz|^{1/2}; for the classical one
@@ -105,7 +119,7 @@ pub fn compute_empirical_variogram(
         let bin_width = max_dist / n_bins as Real;
         for i in 0..n {
             for j in (i + 1)..n {
-                let d = haversine_distance(coords[i], coords[j]);
+                let d = distance(i, j);
                 if d > max_dist {
                     continue;
                 }
@@ -131,7 +145,7 @@ pub fn compute_empirical_variogram(
         let mut max_observed: Real = 0.0;
         for i in 0..n {
             for j in (i + 1)..n {
-                let d = haversine_distance(coords[i], coords[j]);
+                let d = distance(i, j);
                 if d > max_observed {
                     max_observed = d;
                 }
@@ -145,7 +159,7 @@ pub fn compute_empirical_variogram(
         let bin_width = max_observed / n_bins as Real;
         for i in 0..n {
             for j in (i + 1)..n {
-                let d = haversine_distance(coords[i], coords[j]);
+                let d = distance(i, j);
                 let mut bin = (d / bin_width).floor() as usize;
                 if bin >= n_bins {
                     bin = n_bins - 1;
